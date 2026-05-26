@@ -14,7 +14,47 @@ description: 上下文管理最佳实践。指导 agent 在何时以及如何主
 
 > **Compact 不是失败，而是主动的认知整理。在开始新任务前清理旧上下文，比等到 token 超阈值再被动 compact 更有效。**
 
-## 自动 compact 机制
+## Pre-loop compact review（新）
+
+`agent.py` 内置了 `_pre_loop_compact_review` 机制，在 **每次 agent loop 开始之前**（即处理用户消息之前）执行：
+
+### 触发条件
+
+1. 历史消息 ≥ 6 条
+2. 调用 LLM 判断：**新用户消息是否代表一个与之前对话独立的新任务**
+
+### LLM 判断逻辑
+
+LLM 收到一个 review prompt，包含：
+- 对话历史摘要（前部分 + 最近 4 条）
+- 新用户消息
+- 判断标准：是否 shift 到了新的独立任务/不同层次
+
+### 判断示例
+
+| 之前任务 | 新任务 | 是否 compact |
+|---------|-------|------------|
+| 调研学校 A | 调研学校 B | ✅ COMPACT |
+| 验证候选人 A | 验证候选人 B | ✅ COMPACT |
+| 调研学校 | 诊断 restart 问题 | ✅ COMPACT |
+| 浏览页面 X | 继续浏览页面 X | ❌ 不 compact |
+| 保存报告 | 修改报告 typo | ❌ 不 compact |
+| 调研 A | 补充 A 的更多细节 | ❌ 不 compact |
+
+### 失败安全
+
+如果 LLM 调用失败（网络、解析等），**静默跳过**，不进行 compact，保证不会因 review 失败而丢失上下文。
+
+### 与自动 compact 的关系
+
+| 机制 | 触发时机 | 判断方式 | 目的 |
+|------|---------|---------|------|
+| `_pre_loop_compact_review` | loop 开始前 | LLM 语义判断 | 跨任务边界清理 |
+| `_pre_action_compact_check` | tool_calls 执行前 | 硬阈值（数量+token） | 同任务内防溢出 |
+
+两者互补：pre-loop 负责**任务级别的语义压缩**，pre-action 负责**token 级别的防溢出压缩**。
+
+## 自动 compact 机制（原有）
 
 `agent.py` 内置了 `_pre_action_compact_check` 机制，在每次执行 tool_calls 前自动判断：
 
@@ -162,6 +202,6 @@ compact 后，system prompt 会重新构建（`build_system_prompt`），确保�
 
 ## References
 
-- `research_agent/agent.py` — `_pre_action_compact_check` 方法实现
+- `research_agent/agent.py` — `_pre_loop_compact_review` 和 `_pre_action_compact_check` 方法实现
 - `research_agent/context.py` — `compact_messages` 函数实现
 - `research_agent/tools/compact.py` — `compact_context` tool 实现

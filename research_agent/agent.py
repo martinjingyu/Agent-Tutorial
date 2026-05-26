@@ -62,6 +62,86 @@ class ResearchAgent:
         except Exception:
             return ""
 
+    def _pre_loop_compact_review(
+        self,
+        messages: list[dict[str, Any]],
+        user_message: str,
+        system_prompt: str,
+    ) -> list[dict[str, Any]] | None:
+        """Review conversation history before the agent loop starts.
+
+        Uses the LLM to determine whether the conversation has moved to a new,
+        independent task phase. If so, compact the history to keep context focused.
+
+        Returns compacted messages if compaction is needed, None otherwise.
+
+        The LLM is asked to judge whether the upcoming user_message represents
+        a shift to a new independent task (vs. continuing the same task).
+        """
+        # Only review if there is substantial history to consider
+        if len(messages) < 6:
+            self.ui.event("compact-review", "skipped: too few messages")
+            return None
+
+        # Build a compact review prompt for the LLM
+        # We send a condensed view of the conversation: the last assistant response
+        # (if any) and the new user message, plus a summary of what came before.
+        review_prompt = f"""You are a context management assistant. Your job is to decide whether to compact the conversation history.
+
+        ## Current situation
+        The agent has an existing conversation history and is about to process a new user message.
+
+        ## Decision criteria
+        Compact the history ONLY if the new user message represents a shift to a **new, independent task** at a different level or domain from the previous conversation. Examples:
+
+        - Previous task: "Research Stanford CS program" → New task: "Now research MIT's program" → **COMPACT** (independent tasks)
+        - Previous task: "Find candidate A's GitHub" → New task: "Now verify candidate B's LinkedIn" → **COMPACT** (different candidate)
+        - Previous task: "Research school programs" → New task: "Diagnose why the agent restarted" → **COMPACT** (different domain)
+        - Previous task: "Browse page X" → New task: "Continue browsing page X for more details" → **DO NOT COMPACT** (same task)
+        - Previous task: "Save report" → New task: "Fix a typo in the report" → **DO NOT COMPACT** (same task, refinement)
+        - Previous task: "Research program A" → New task: "Here are more details about program A" → **DO NOT COMPACT** (same task)
+
+        ## Conversation summary (earlier part)
+        {json.dumps(messages[:-4], ensure_ascii=False, default=str)[:8000]}
+
+        ## Recent messages
+        {json.dumps(messages[-4:], ensure_ascii=False, default=str)[:4000]}
+
+        ## New user message
+        {user_message[:2000]}
+
+        ## Your response
+        Answer with a JSON object only, no other text:
+        {{"should_compact": true/false, "reason": "brief reason", "focus": "what to preserve in compaction"}}
+        """
+        try:
+            self.ui.event("compact-review", "checking if conversation has moved to a new task")
+            result = self.llm.complete_text(review_prompt).strip()
+            # Extract JSON from the response
+            if "{" in result:
+                json_str = result[result.index("{"):]
+                if "}" in json_str:
+                    json_str = json_str[:json_str.rindex("}") + 1]
+                    decision = json.loads(json_str)
+                    if decision.get("should_compact"):
+                        focus = decision.get("focus", user_message)
+                        self.ui.compact(
+                            f"pre-loop: {decision.get('reason', 'new independent task')}"
+                        )
+                        compacted = compact_messages(
+                            messages, self.llm, focus=focus
+                        )
+                        return self._repair_tool_sequences(compacted)
+                    else:
+                        self.ui.event(
+                            "compact-review",
+                            f"no compact needed: {decision.get('reason', 'same task')}",
+                        )
+        except Exception as e:
+            # If LLM call fails, fall through silently — no compaction is safe
+            self.ui.event("compact-review", f"skipped ({type(e).__name__})")
+        return None
+
     def _pre_action_compact_check(
         self, messages: list[dict[str, Any]], system_prompt: str, user_message: str
     ) -> list[dict[str, Any]] | None:
@@ -105,8 +185,22 @@ class ResearchAgent:
 
     def run(self, user_message: str, history: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         messages = self._repair_tool_sequences(list(history or []))
-        messages.append({"role": "user", "content": user_message})
         system_prompt = build_system_prompt(self._skills_index())
+
+        # ── Pre-loop compact review ──────────────────────────────────────
+        # Before adding the new user message and starting the agent loop,
+        # review the conversation history to see if we've moved to a new
+        # independent task. If so, compact the history.
+        if messages:
+            compacted = self._pre_loop_compact_review(
+                messages, user_message, system_prompt
+            )
+            if compacted is not None:
+                messages = compacted
+                system_prompt = build_system_prompt(self._skills_index())
+        # ─────────────────────────────────────────────────────────────────
+
+        messages.append({"role": "user", "content": user_message})
         final_text = ""
 
         for iteration in range(1, self.max_iterations + 1):
@@ -448,15 +542,19 @@ Recent conversation JSON:
             if role == "assistant" and msg.get("tool_calls"):
                 calls = []
                 for tc in msg.get("tool_calls", []):
-                    fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
-                    calls.append(f"{fn.get('name')}({fn.get('arguments')})")
-                content = msg.get("content") or ""
-                lines.append(f"assistant: {content}\nassistant tool calls: " + "; ".join(calls))
+                    fn = (tc.get("function") or {}).get("name", "?")
+                    calls.append(fn)
+                lines.append(f"[tool calls: {', '.join(calls)}]")
+            elif role == "assistant":
+                content = (msg.get("content") or "")[:200]
+                if content:
+                    lines.append(content)
+            elif role == "user":
+                content = (msg.get("content") or "")[:200]
+                if content and not content.startswith("[CONTEXT COMPACTION"):
+                    lines.append(f"user: {content}")
             elif role == "tool":
-                name = msg.get("name", "tool")
-                content = str(msg.get("content") or "")
-                lines.append(f"tool {name}: {content[:1200]}")
-            else:
-                content = str(msg.get("content") or "")
-                lines.append(f"{role}: {content[:2000]}")
-        return "\n\n".join(lines)
+                name = msg.get("name", "?")
+                content = (msg.get("content") or "")[:120]
+                lines.append(f"  → {name}: {content}")
+        return "\n".join(lines)
