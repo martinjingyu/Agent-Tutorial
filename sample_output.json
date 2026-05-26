@@ -1,0 +1,77 @@
+{
+  "plan": {
+    "query": "AI agents in software engineering",
+    "optimizedPrompt": "Analyze AI agents in software engineering with emphasis on key facts, tradeoffs, and implications.",
+    "explanation": "Mock planner keeps the original topic as the search query.",
+    "suggestedStructure": [
+      "Background",
+      "Current evidence",
+      "Implications"
+    ]
+  },
+  "analysis": {
+    "rankings": [
+      {
+        "url": "https://example.com/background",
+        "score": 0.95,
+        "reasoning": "Mock ranking based on original order."
+      },
+      {
+        "url": "https://example.com/evidence",
+        "score": 0.7999999999999999,
+        "reasoning": "Mock ranking based on original order."
+      },
+      {
+        "url": "https://example.org/analysis",
+        "score": 0.6499999999999999,
+        "reasoning": "Mock ranking based on original order."
+      }
+    ],
+    "analysis": "Mock analysis ranked earlier results higher."
+  },
+  "selectedSources": [
+    {
+      "id": "mock-1",
+      "url": "https://example.com/background",
+      "title": "Background on AI agents in software engineering",
+      "snippet": "A broad overview of the topic, major terms, and context.",
+      "score": 0.95
+    },
+    {
+      "id": "mock-3",
+      "url": "https://example.org/analysis",
+      "title": "Expert analysis of AI agents in software engineering",
+      "snippet": "A different domain with interpretation and implications.",
+      "score": 0.6499999999999999
+    }
+  ],
+  "report": {
+    "title": "Mock Deep Research Report",
+    "summary": "This is a mock report generated without calling an external model.",
+    "sections": [
+      {
+        "title": "What happened in the pipeline",
+        "content": "The agent optimized the prompt, searched for sources, ranked them, fetched content, and synthesized a report."
+      },
+      {
+        "title": "How to make it real",
+        "content": "Set OPENAI_API_KEY and a real search provider such as Google or Bing, then run without --mock-model."
+      }
+    ],
+    "usedSources": [
+      1
+    ],
+    "sources": [
+      {
+        "id": "mock-1",
+        "url": "https://example.com/background",
+        "name": "Background on AI agents in software engineering"
+      },
+      {
+        "id": "mock-3",
+        "url": "https://example.org/analysis",
+        "name": "Expert analysis of AI agents in software engineering"
+      }
+    ]
+  }
+}
