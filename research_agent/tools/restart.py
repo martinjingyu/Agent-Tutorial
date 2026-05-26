@@ -9,6 +9,8 @@ the Guardian (parent process) interprets as a restart signal.
 
 Usage:
     request_restart(changes=["Fixed terminal encoding bug in tools/terminal.py"])
+
+# TEST: Guardian restart test - 2025-07-11
 """
 
 from __future__ import annotations
