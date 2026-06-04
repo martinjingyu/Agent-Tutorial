@@ -218,6 +218,10 @@ def _h_reddit_search(args: dict, _rt: dict) -> str:
     return json_result(**search("reddit", args.get("query", "")))
 
 
+def _h_save_research_notes(args: dict, _rt: dict) -> str:
+    return json_result(success=True)
+
+
 registry.register("browser_navigate", {
     "description": "Navigate to a URL and return an accessibility snapshot. Use direct search tools for search-engine queries.",
     "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
@@ -289,3 +293,21 @@ registry.register("reddit_search", {
     "description": "Search Reddit directly and return a browser snapshot of the result page. Use for community discussions and first-hand accounts.",
     "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
 }, _h_reddit_search)
+
+registry.register("save_research_notes", {
+    "description": (
+        "Save concise notes from the current browser/file result before moving on. "
+        "After this tool runs, the previous large tool result is replaced in context "
+        "with these notes to reduce token cost while preserving important findings."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "notes": {
+                "type": "string",
+                "description": "Important findings as concise bullets, including URLs and concrete facts.",
+            }
+        },
+        "required": ["notes"],
+    },
+}, _h_save_research_notes)

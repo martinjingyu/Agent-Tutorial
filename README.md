@@ -13,6 +13,8 @@ It supports:
 - Local skill library
 - Session save/resume
 - Automatic context compaction and large-result spill-to-disk
+- Background self-review for memory/skill improvements
+- Background planning tools: sub-agent and sub-LLM subprocesses
 - Guardian restart flow for self-fixes
 
 ## Setup
@@ -149,6 +151,7 @@ research_agent/
     respond.py          # final response tool
     restart.py          # guardian restart request tool
     skills.py           # skill management tools
+    subprocess_tools.py # plan_subagent and plan_subllm tools
     terminal.py         # terminal command tool
 skills/                 # reusable local skills
 memories/               # persistent USER.md and MEMORY.md
@@ -167,3 +170,13 @@ The agent keeps context lean by:
 - preserving session JSON under `sessions/`
 
 Use `memory` for stable preferences and project facts. Use `skills` for reusable task workflows, templates, scripts, and checklists.
+
+Self-review runs in a background thread after the turn session is saved. The user-facing response returns immediately; any memory/skill improvements are handled afterward and recorded as `sessions/self_review_<session_id>.json`.
+
+## Background Planning Tools
+
+`plan_subagent` starts a backend general-agent subprocess from a `user_prompt`. It does not require a system prompt because it uses this repo's general agent prompt.
+
+`plan_subllm` starts a backend model-only subprocess from `system_prompt` and `user_prompt`.
+
+Both return immediately with a `cache_path`. The subprocess writes queued/running/completed/error status into that JSON file, plus the final result. Sub-agent runs also write live messages while they execute.

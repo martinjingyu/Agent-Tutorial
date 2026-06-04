@@ -4,7 +4,7 @@ from .registry import registry
 
 
 def load_builtin_tools() -> None:
-    from . import browser, compact, files, memory, respond, restart, skills, terminal  # noqa: F401
+    from . import browser, compact, files, memory, respond, restart, skills, subprocess_tools, terminal  # noqa: F401
 
 
 __all__ = ["registry", "load_builtin_tools"]
