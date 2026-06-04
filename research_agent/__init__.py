@@ -1,2 +1,1 @@
-"""Minimal browser research agent inspired by Hermes Agent."""
-
+"""General tool-use agent with browser, memory, skills, and session support."""

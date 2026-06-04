@@ -1,157 +1,169 @@
-# Agent Deep Research Tutorial
+# General Run Agent
 
-This repo now contains two tutorial agents:
+This repo is now a compact general-purpose tool-use agent. The core code lives in `research_agent/`.
 
-- `agent_deep_research.py`: the original linear search/rank/report pipeline.
-- `run_research_agent.py`: a Hermes-inspired action-loop agent with browser, file, memory, skills, terminal, context compaction, and **self-updating code** via a Master-Worker architecture.
+It supports:
+
+- LLM tool-call agent loop
+- Browser tools with per-run isolated browser state
+- Optional shared Chrome profile for retained login sessions
+- File read/search/write/patch tools
+- Terminal tool
+- Persistent memory
+- Local skill library
+- Session save/resume
+- Automatic context compaction and large-result spill-to-disk
+- Guardian restart flow for self-fixes
 
 ## Setup
 
+Install Python dependencies:
+
 ```powershell
 pip install -r requirements.txt
-npm install
-npx agent-browser install
 ```
 
-Set a DeepSeek API key:
+Choose one provider.
+
+DeepSeek API key mode:
 
 ```powershell
+$env:AGENT_PROVIDER="deepseek"
 $env:DEEPSEEK_API_KEY="your-key"
 $env:DEEPSEEK_MODEL="deepseek-v4-flash"
 $env:DEEPSEEK_THINKING="disabled"
 ```
 
-Optional:
+Codex API mode:
 
 ```powershell
-$env:DEEPSEEK_BASE_URL="https://api.deepseek.com"
+codex login
+$env:AGENT_PROVIDER="codex"
+$env:CODEX_MODEL="gpt-5.4"
 ```
 
-## Run The Browser Research Agent
-
-### Normal Mode
+Codex mode reads the OAuth access token from `%USERPROFILE%\.codex\auth.json` by default. You can override with:
 
 ```powershell
-python .\run_research_agent.py "Research Beijing University of Posts and Telecommunications 电信工程及管理专业 and save a markdown report."
+$env:CODEX_HOME="C:\path\to\.codex"
+$env:CODEX_BASE_URL="https://chatgpt.com/backend-api/codex"
+$env:CODEX_MAX_RETRIES="8"
+$env:CODEX_RETRY_SLEEP="3.5"
 ```
 
-### Guardian Mode (Self-Updating)
+Generic OpenAI-compatible mode also works:
 
 ```powershell
-python .\run_research_agent.py --guardian "Research Beijing University of Posts and Telecommunications 电信工程及管理专业"
+$env:AGENT_PROVIDER="openai"
+$env:OPENAI_API_KEY="your-key"
+$env:OPENAI_BASE_URL="https://api.openai.com/v1"
+$env:OPENAI_MODEL="gpt-4o-mini"
 ```
 
-In Guardian mode, if the agent discovers a bug in its own source code and fixes it, it can call `request_restart(changes=[...])` to trigger a clean restart. The Guardian (parent process) detects the exit code 42 and spawns a fresh Worker process with the updated code.
-
-### Chat Mode
-
-```powershell
-python .\run_research_agent.py --chat
-python .\run_research_agent.py --guardian --chat   # with self-updating support
-```
-
-### Resume a Session
-
-```powershell
-python .\run_research_agent.py --resume 20260526_141013
-```
-
-## Capabilities
-
-The agent can:
-
-- **Browse the web** — navigate pages with `browser_navigate`, inspect `browser_snapshot`, and interact with refs using `browser_click`/`browser_type`.
-- **Read & write files** — read, search, patch, and write files under the whole `C:\Users\LX034\Code` workspace by default.
-- **Save reports** — tutorial-agent reports under `Agent-Tutorial/reports/` when no other path is requested.
-- **Persistent memory** — project-local memory in `memories/MEMORY.md` and `memories/USER.md`.
-- **Skill library** — read and update project-local skills under `skills/`.
-- **Context compaction** — automatic pre-action compact when tool results accumulate after a final response; manual compact via `compact_context(focus="...")`.
-- **Self-updating code** — when running under `--guardian`, the agent can fix bugs in its own source code and trigger a clean restart via `request_restart(changes=[...])`.
-- **Error recovery** — after 3+ consecutive identical errors, the agent stops retrying and reviews its own source code to find and fix the root cause.
-
-By default, tool paths are resolved against the parent `Code` folder, not only this repo. You can override that root:
+Optional workspace override:
 
 ```powershell
 $env:AGENT_WORKSPACE_ROOT="C:\Users\LX034\Code"
 ```
 
+## Run
+
+Single task:
+
+```powershell
+python .\run_agent.py "Use the browser to research X, then save a markdown report under reports/."
+```
+
+Provider/model can also be selected per command:
+
+```powershell
+python .\run_agent.py --provider deepseek --model deepseek-v4-flash "Do the task."
+python .\run_agent.py --provider codex --model gpt-5.4 "Do the task."
+```
+
+Interactive chat:
+
+```powershell
+python .\run_agent.py --chat
+```
+
+Resume a saved session:
+
+```powershell
+python .\run_agent.py --resume 20260526_141013 "Continue from the last state and finish the report."
+python .\run_agent.py --resume .\sessions\20260526_141013.json --chat
+```
+
+Guardian mode:
+
+```powershell
+python .\run_agent.py --guardian "Run the task. If you find a bug in your own source, fix it and restart."
+```
+
+`run_research_agent.py` remains as a compatibility alias for old commands.
+
+## Browser Session
+
+The browser tool launches Chrome through the local CDP controller in `research_agent/tools/cli.js`.
+
+Each Python process gets:
+
+- its own CDP port
+- its own `.agentbrowser/<pid>/refs.json`
+- its own scratch profile when a shared profile exists
+
+Prepare a reusable shared browser profile from your existing Chrome profile:
+
+```powershell
+python .\run_agent.py --setup-browser-profile
+```
+
+Or open a manual login session:
+
+```powershell
+python .\run_agent.py --login-browser
+```
+
+After login, close Chrome completely. Future agent runs copy `research_agent/.agentbrowser/profiles/shared` into a per-run scratch profile, so cookies are reused but the shared profile is not mutated during the run.
+
 ## Project Layout
 
 ```text
 research_agent/
-  agent.py          # action loop + pre-action compact check + self-restart logic
-  cli.py            # CLI entry point (normal + guardian mode)
-  context.py        # rough token count + compaction
-  guardian.py       # Master process: spawns Worker, detects exit code 42, auto-restarts
-  prompts.py        # system and self-review prompts
-  state.py          # session save/load
-  paths.py          # project directory paths
+  agent.py              # general tool-call loop, compaction, session save, restart hook
+  browser_profile.py    # shared/scratch browser profile management
+  cli.py                # command-line entry point
+  context.py            # rough token counting and LLM compaction
+  guardian.py           # parent process for self-restart flow
+  llm.py                # OpenAI-compatible client
+  prompts.py            # general agent and self-review prompts
+  state.py              # session save/load helpers
   tools/
-    __init__.py     # tool loader
-    registry.py     # tool registration & dispatch
-    browser.py      # browser navigation tools
-    compact.py      # compact_context tool
-    files.py        # read/write/search/patch file tools
-    memory.py       # memory read/write tools
-    respond.py      # respond_to_user tool
-    restart.py      # request_restart tool (signals Guardian to restart)
-    skills.py       # skill management tools
-    terminal.py     # terminal command tool
-skills/             # project-local skill library
-  utilities/
-    context-management/     # context compaction best practices
-    windows-file-operations/ # Windows file I/O best practices
-  research/
-    university-program-research/  # university program research workflow
-  hr-recruitment/
-    cv-link-deep-research/        # CV link verification workflow
-    stage1-screening-report/      # Stage 1 screening report workflow
-memories/           # project-local persistent memory
-reports/            # generated reports
-sessions/           # saved conversation JSON
+    browser.py          # browser/search tools
+    cli.js              # minimal Chrome CDP controller
+    cdp.js              # CDP helper
+    compact.py          # compact_context tool
+    files.py            # read/list/search/write/patch tools
+    memory.py           # persistent memory tool
+    registry.py         # tool registry
+    respond.py          # final response tool
+    restart.py          # guardian restart request tool
+    skills.py           # skill management tools
+    terminal.py         # terminal command tool
+skills/                 # reusable local skills
+memories/               # persistent USER.md and MEMORY.md
+sessions/               # saved conversations
+reports/                # generated outputs
+run_agent.py            # primary entry point
 ```
 
-## Master-Worker Architecture
+## Context And Memory
 
-```
-┌─ Guardian (master) ────────────────────────────┐
-│  python run_research_agent.py --guardian ...    │
-│                                                 │
-│  ① spawn Worker subprocess                      │
-│  ② process.wait() — monitor exit code           │
-│  ③ exit code 42 → read signal file → re-spawn   │
-│  ④ exit code 0 → normal exit                    │
-│  ⑤ Ctrl+C → terminate Worker → exit             │
-└─────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─ Worker (agent) ───────────────────────────────┐
-│  ① Execute tasks normally                       │
-│  ② Discover bug → read_file → write_file fix    │
-│  ③ Call request_restart(changes=["..."])         │
-│  ④ run() ends → detect flag → sys.exit(42)      │
-│  ⑤ Guardian detects 42 → re-spawn               │
-│  ⑥ New Worker loads updated code + --resume      │
-└──────────────────────────────────────────────────┘
-```
+The agent keeps context lean by:
 
-**Safety limits**:
-- Maximum 10 restarts per session (prevents infinite loops).
-- Signal file `.restart_signal.json` records changes, session info, and next prompt.
-- Session is saved before exit; new Worker resumes automatically.
+- compacting long conversation history with an LLM summary
+- truncating older browser snapshots once newer snapshots arrive
+- spilling oversized browser results to `sessions/.tool_cache/<session_id>/`
+- preserving session JSON under `sessions/`
 
-## Offline Linear Demo
-
-```powershell
-python .\agent_deep_research.py "AI agents in software engineering" --mock-model --provider mock --mock-content
-```
-
-## Interrupt & Correct
-
-During a run, press `Ctrl+C` to interrupt the current model/tool action. The agent will pause and show:
-
-```text
-Correction>
-```
-
-Enter a correction such as `不要继续点招生页面，回到计算机学院官网查课程设置`, and the same session will continue with that instruction in context. Enter `/stop` or press `Ctrl+C` again at the correction prompt to save the current session and exit the turn.
+Use `memory` for stable preferences and project facts. Use `skills` for reusable task workflows, templates, scripts, and checklists.

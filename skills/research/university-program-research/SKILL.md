@@ -17,6 +17,12 @@ Use this skill when the user asks for a university, college, department, major, 
 
 **⚠️ Always start with browser_navigate before falling back to curl/terminal.** The browser tools can handle JS-rendered pages that curl cannot. Only use curl when browser_navigate times out or returns an empty/error snapshot.
 
+**⚠️ Tab panels and accordion content:** Many university program pages use tab panels (Overview, Requirements, Outcomes, etc.) or accordion UI patterns. The initial `browser_navigate` snapshot may only show the first tab's content or no content at all. If the main program description is missing:
+1. Try `browser_scroll(direction="down")` — this can trigger lazy-loaded tab content.
+2. Then take another `browser_snapshot()` — the full snapshot mode often reveals the hidden text.
+3. If still missing, try clicking tab elements: `browser_click(ref="@e{ref}")` on the tab button, then snapshot again.
+4. Example: guide.wisc.edu uses tab panels — scrolling + re-snapshot reveals the Overview text.
+
 Start with the **school's main site** to confirm current organizational structure, then drill into the department.
 
 ```
@@ -176,6 +182,7 @@ When official sources are unreachable (network blocks, JS-only pages, anti-bot p
 - `references/report-checklist.md` for final quality checks.
 - `references/chinese-university-research.md` for tips on researching Chinese universities (anti-bot sites, Baidu Baike fallback, etc.).
 - `references/research-troubleshooting.md` for common research pitfalls: Python stdout buffering on Windows, search engine blocking, Baidu Baike snapshot truncation, and terminal output issues.
+- `references/url-discovery-strategies.md` — systematic strategies for finding program URLs when you don't know them (pattern construction, search, catalog discovery, Chinese university 招生网 approach, decision tree).
 - `scripts/fetch-reddit-posts.py` — reusable script to fetch student perspectives from a university's subreddit.
 - [CSRankings](http://csrankings.org/) — research-oriented CS program rankings by sub-area
 

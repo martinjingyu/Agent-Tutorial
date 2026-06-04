@@ -4,21 +4,34 @@ import argparse
 import sys
 from pathlib import Path
 
-from .agent import ResearchAgent
+from .agent import GeneralAgent
 from .env import load_dotenv
 from .state import load_session
 from .ui import ConsoleUI
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Agent-Tutorial browser research agent.")
-    parser.add_argument("prompt", nargs="?", help="Research or automation task")
+    parser = argparse.ArgumentParser(description="Run the Agent-Tutorial general tool-use agent.")
+    parser.add_argument("prompt", nargs="?", help="Task for the agent")
     parser.add_argument("--model", default=None)
+    parser.add_argument("--provider", choices=["deepseek", "codex", "openai"], help="Model provider override.")
     parser.add_argument("--no-self-review", action="store_true")
     parser.add_argument("--max-iterations", type=int, default=50)
     parser.add_argument("--chat", action="store_true", help="Start an interactive multi-turn chat session.")
     parser.add_argument("--resume", help="Resume from a session id or sessions/*.json path.")
     parser.add_argument("--quiet-actions", action="store_true", help="Hide per-action model/tool trace lines.")
+    parser.add_argument(
+        "--setup-browser-profile",
+        nargs="?",
+        const="",
+        metavar="CHROME_PROFILE",
+        help="Copy an existing Chrome profile into the agent shared browser profile.",
+    )
+    parser.add_argument(
+        "--login-browser",
+        action="store_true",
+        help="Open Chrome with the shared agent browser profile so you can log in manually.",
+    )
     parser.add_argument(
         "--guardian",
         action="store_true",
@@ -37,8 +50,22 @@ def main() -> None:
 
     # ── Normal (Worker) mode ───────────────────────────────────────
     load_dotenv()
-    agent = ResearchAgent(
+
+    if args.setup_browser_profile is not None:
+        from .browser_profile import setup_profile
+
+        setup_profile(args.setup_browser_profile or None)
+        return
+
+    if args.login_browser:
+        from .browser_profile import login_session
+
+        login_session()
+        return
+
+    agent = GeneralAgent(
         model=args.model,
+        provider=args.provider,
         max_iterations=args.max_iterations,
         self_review=not args.no_self_review,
         ui=ConsoleUI(enabled=not args.quiet_actions),

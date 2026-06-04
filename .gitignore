@@ -1,1 +1,7 @@
 .env
+/workspace
+__pycache__/
+*.pyc
+/.agentbrowser/
+/research_agent/.agentbrowser/
+/sessions/.tool_cache/

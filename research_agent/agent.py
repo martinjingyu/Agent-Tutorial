@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 import uuid
 from typing import Any
 
 from .context import compact_messages, rough_tokens, tool_result_too_large
 from .llm import LLMClient
-from .paths import ensure_project_dirs
+from .paths import SESSIONS_DIR, ensure_project_dirs
 from .prompts import SELF_REVIEW_PROMPT, build_system_prompt
 from .state import new_session_id, save_session
 from .tools import load_builtin_tools, registry
@@ -17,6 +18,20 @@ from .ui import ConsoleUI
 COMPACT_AFTER_FINAL_TOOL_COUNT = 8
 """If the number of tool results after the last final_response exceeds this,
 the agent will compact before executing the next batch of tool calls."""
+
+MAX_TOOL_RESULT_CHARS = 8_000
+SPILL_PREVIEW_CHARS = 600
+SNAPSHOT_TOOL_NAMES = {"browser_navigate", "browser_snapshot"}
+NO_SPILL_TOOLS = {
+    "read_file",
+    "list_files",
+    "search_files",
+    "write_file",
+    "patch_file",
+    "terminal",
+    "run_cmd",
+}
+PREVIOUS_SNAPSHOT_LIMIT = 2_000
 
 
 def _reasoning_content(message: Any) -> str | None:
@@ -29,11 +44,12 @@ def _reasoning_content(message: Any) -> str | None:
     return None
 
 
-class ResearchAgent:
+class GeneralAgent:
     def __init__(
         self,
         *,
         model: str | None = None,
+        provider: str | None = None,
         max_iterations: int = 24,
         context_threshold_tokens: int = 90000,
         self_review: bool = True,
@@ -41,14 +57,18 @@ class ResearchAgent:
     ) -> None:
         ensure_project_dirs()
         load_builtin_tools()
-        self.llm = LLMClient(model=model)
+        self.llm = LLMClient(model=model, provider=provider)
         self.max_iterations = max_iterations
         self.context_threshold_tokens = context_threshold_tokens
         self.self_review_enabled = self_review
         self.ui = ui or ConsoleUI(enabled=True)
         self.session_id = new_session_id()
         self.task_id = f"task_{uuid.uuid4().hex[:8]}"
+        self._spill_dir = SESSIONS_DIR / ".tool_cache" / self.session_id
+        self._spill_counter = 0
         self.ui.session_start(self.session_id, self.task_id)
+        self._pending_restart: list[str] | None = None
+        self._pending_restart_prompt: str | None = None
 
     def _skills_index(self) -> str:
         result = registry.dispatch("skills_list", {}, {"task_id": self.task_id})
@@ -296,8 +316,9 @@ class ResearchAgent:
                             compact_focus = str(runtime["compact_requested"])
                         if runtime.get("_pending_restart"):
                             self._pending_restart = runtime["_pending_restart"]
-                            self._pending_restart_prompt = runtime.get("_pending_restart_prompt")
-                    result = tool_result_too_large(result)
+                            if runtime.get("_pending_restart_prompt"):
+                                self._pending_restart_prompt = runtime["_pending_restart_prompt"]
+                    result = self._process_tool_result(result, tc.function.name)
                     self.ui.tool_done(tc.function.name, result)
                     messages.append(
                         {
@@ -307,6 +328,8 @@ class ResearchAgent:
                             "content": result,
                         }
                     )
+                    if tc.function.name in SNAPSHOT_TOOL_NAMES:
+                        self._compress_previous_snapshot(messages)
                     if interrupted:
                         for skipped in tool_calls[index + 1 :]:
                             skipped_result = json.dumps(
@@ -363,23 +386,16 @@ class ResearchAgent:
         if final_text and self.self_review_enabled:
             self._self_review(messages)
 
-        # ── Self-restart check ──────────────────────────────────────────
-        # If the agent modified its own source code during this run,
-        # it should have set self._pending_restart. If so, signal the
-        # Guardian (parent process) to restart us.
-        if getattr(self, "_pending_restart", None):
+        if self._pending_restart:
             from .guardian import request_restart
-
             request_restart(
                 changes=self._pending_restart,
                 session_id=self.session_id,
                 resume_path=str(session_path),
                 next_prompt=self._pending_restart_prompt,
             )
-            # Flush output so the user sees the final message before exit
             sys.stdout.flush()
-            sys.exit(42)  # RESTART_EXIT_CODE
-        # ────────────────────────────────────────────────────────────────
+            sys.exit(42)
 
         return {
             "session_id": self.session_id,
@@ -387,6 +403,45 @@ class ResearchAgent:
             "final": final_text,
             "messages": messages,
         }
+
+    def _process_tool_result(self, result: Any, tool_name: str) -> Any:
+        result = tool_result_too_large(result)
+        if not isinstance(result, str) or len(result) <= MAX_TOOL_RESULT_CHARS:
+            return result
+        if tool_name in NO_SPILL_TOOLS:
+            return result[:MAX_TOOL_RESULT_CHARS] + "\n[truncated]"
+        return self._spill_tool_result(result, tool_name)
+
+    def _spill_tool_result(self, result: str, tool_name: str) -> str:
+        self._spill_dir.mkdir(parents=True, exist_ok=True)
+        self._spill_counter += 1
+        path = self._spill_dir / f"{tool_name}_{self._spill_counter:04d}_{int(time.time())}.txt"
+        path.write_text(result, encoding="utf-8")
+        preview = result[:SPILL_PREVIEW_CHARS]
+        return (
+            "[content too large; saved to disk]\n"
+            f"path: {path}\n"
+            "Use read_file(path) if the full content is needed.\n\n"
+            f"--- preview ({SPILL_PREVIEW_CHARS} chars) ---\n"
+            f"{preview}\n[...]"
+        )
+
+    def _compress_previous_snapshot(self, messages: list[dict[str, Any]]) -> None:
+        found = 0
+        for index in range(len(messages) - 1, -1, -1):
+            msg = messages[index]
+            if msg.get("role") != "tool" or msg.get("name") not in SNAPSHOT_TOOL_NAMES:
+                continue
+            found += 1
+            if found != 2:
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, str) and len(content) > PREVIOUS_SNAPSHOT_LIMIT:
+                messages[index] = {
+                    **msg,
+                    "content": content[:PREVIOUS_SNAPSHOT_LIMIT] + "\n[previous browser snapshot compressed]",
+                }
+            return
 
     def _interrupt_correction(self) -> str | None:
         self.ui.interrupt()
@@ -558,3 +613,6 @@ Recent conversation JSON:
                 content = (msg.get("content") or "")[:120]
                 lines.append(f"  → {name}: {content}")
         return "\n".join(lines)
+
+
+ResearchAgent = GeneralAgent

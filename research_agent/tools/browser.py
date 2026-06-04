@@ -2,201 +2,290 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
-import tempfile
-import uuid
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from .registry import json_result, registry
 
-_SESSION_NAMES: dict[str, str] = {}
+
+CLI_PATH = Path(os.getenv("AGENT_BROWSER_CLI", str(Path(__file__).parent / "cli.js")))
+SNAPSHOT_MAX_CHARS = 10_000
+NAVIGATE_SNAPSHOT_MAX_CHARS = 8_000
+
+PROC_PID = os.getpid()
+BROWSER_PORT = int(os.getenv("AGENT_BROWSER_PORT", str(9222 + PROC_PID % 1000)))
+BROWSER_INSTANCE = os.getenv("AGENT_BROWSER_INSTANCE", str(PROC_PID))
 
 
-def _session_name(task_id: str) -> str:
-    if task_id not in _SESSION_NAMES:
-        _SESSION_NAMES[task_id] = f"tutorial_{uuid.uuid4().hex[:10]}"
-    return _SESSION_NAMES[task_id]
+def _cli_env() -> dict[str, str]:
+    from ..browser_profile import ensure_browser_profile
 
-
-def _agent_browser_cmd() -> list[str]:
-    direct = shutil.which("agent-browser")
-    if direct:
-        return [direct]
-    npx = shutil.which("npx")
-    if npx:
-        return [npx, "agent-browser"]
-    return ["npx", "agent-browser"]
-
-
-def _run_browser(task_id: str, command: str, args: list[str], timeout: int = 60) -> dict:
-    session = _session_name(task_id)
-    socket_dir = Path(tempfile.gettempdir()) / f"agent-browser-{session}"
-    socket_dir.mkdir(parents=True, exist_ok=True)
+    ensure_browser_profile()
     env = dict(os.environ)
-    env["AGENT_BROWSER_SOCKET_DIR"] = str(socket_dir)
-    env.setdefault("AGENT_BROWSER_IDLE_TIMEOUT_MS", "300000")
-    cmd = _agent_browser_cmd() + ["--session", session, "--json", command, *args]
-    stdout_path = socket_dir / f"_stdout_{command}_{uuid.uuid4().hex[:6]}"
-    stderr_path = socket_dir / f"_stderr_{command}_{uuid.uuid4().hex[:6]}"
+    env.setdefault("AGENT_BROWSER_PORT", str(BROWSER_PORT))
+    env.setdefault("AGENT_BROWSER_INSTANCE", BROWSER_INSTANCE)
+    return env
+
+
+def _run(command: str, *args: str, timeout: int = 60) -> dict:
+    cmd = ["node", str(CLI_PATH), command, *args]
+    kwargs: dict = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+
     try:
-        stdout_fd = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        stderr_fd = os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            popen_extra: dict = {}
-            if os.name == "nt":
-                create_no_window = 0x08000000
-                popen_extra["creationflags"] = create_no_window
-                popen_extra["close_fds"] = True
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESTDHANDLES
-                popen_extra["startupinfo"] = startupinfo
-            proc = subprocess.Popen(
-                cmd,
-                stdout=stdout_fd,
-                stderr=stderr_fd,
-                stdin=subprocess.DEVNULL,
-                env=env,
-                **popen_extra,
-            )
-        finally:
-            os.close(stdout_fd)
-            os.close(stderr_fd)
-
-        try:
-            proc.wait(timeout=timeout)
-        except KeyboardInterrupt:
-            proc.kill()
-            proc.wait(timeout=5)
-            raise
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
-            return {"success": False, "error": f"browser command timed out after {timeout}s"}
-
-        stdout = stdout_path.read_text(encoding="utf-8", errors="replace")
-        stderr = stderr_path.read_text(encoding="utf-8", errors="replace")
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error": f"browser command timed out after {timeout}s"}
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            env=_cli_env(),
+            **kwargs,
+        )
     except FileNotFoundError:
-        return {"success": False, "error": "agent-browser/npx not found. Run npm install first."}
-    finally:
-        for path in (stdout_path, stderr_path):
-            try:
-                path.unlink()
-            except OSError:
-                pass
+        return {"success": False, "error": "node not found in PATH"}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": f"timed out after {timeout}s"}
 
-    if stdout.strip():
+    stdout = proc.stdout.strip()
+    stderr = proc.stderr.strip()
+
+    if stdout:
         try:
-            return json.loads(stdout)
+            return {"success": True, **json.loads(stdout)}
         except json.JSONDecodeError:
-            return {"success": False, "error": f"Non-JSON browser output: {stdout[:1000]}"}
+            pass
+
     if proc.returncode != 0:
-        return {"success": False, "error": stderr.strip() or f"exit code {proc.returncode}"}
-    return {"success": True, "data": {}}
+        return {"success": False, "error": stderr or f"exit code {proc.returncode}"}
+
+    return {"success": True, "output": stdout}
 
 
-def _truncate_snapshot(text: str, max_chars: int = 10000) -> str:
+def _truncate_text(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
-    return text[:max_chars] + "\n\n[truncated: call browser_snapshot(full=true) or continue navigating]"
+    return text[:max_chars] + "\n\n[truncated - call browser_snapshot(full=true) to see more]"
 
 
-def _browser_navigate(args: dict, runtime: dict) -> str:
-    url = str(args.get("url") or "")
-    if not url:
-        return json_result(success=False, error="url is required")
-    task_id = runtime.get("task_id", "default")
-    result = _run_browser(task_id, "open", [url], timeout=90)
+def navigate(url: str) -> dict:
+    result = _run("open", url, timeout=90)
     if not result.get("success"):
-        return json.dumps(result, ensure_ascii=False)
-    response = {
+        return result
+    snap = snapshot(full=True)
+    text = snap.get("snapshot", "")
+    truncated = len(text) > NAVIGATE_SNAPSHOT_MAX_CHARS
+    return {
         "success": True,
-        "url": result.get("data", {}).get("url", url),
-        "title": result.get("data", {}).get("title", ""),
+        "url": url,
+        "snapshot": _truncate_text(text, NAVIGATE_SNAPSHOT_MAX_CHARS),
+        "refs": snap.get("refs", {}),
+        "origin": snap.get("origin", ""),
+        "truncated": truncated,
     }
-    snap = _run_browser(task_id, "snapshot", ["-c"], timeout=60)
-    if snap.get("success"):
-        data = snap.get("data", {})
-        response["snapshot"] = _truncate_snapshot(data.get("snapshot", ""))
-        response["element_count"] = len(data.get("refs", {}) or {})
-    return json.dumps(response, ensure_ascii=False)
 
 
-def _browser_snapshot(args: dict, runtime: dict) -> str:
-    task_id = runtime.get("task_id", "default")
-    full = bool(args.get("full", False))
-    result = _run_browser(task_id, "snapshot", [] if full else ["-c"], timeout=60)
-    if result.get("success"):
-        data = result.get("data", {})
-        return json_result(
-            success=True,
-            snapshot=_truncate_snapshot(data.get("snapshot", ""), 20000 if full else 10000),
-            element_count=len(data.get("refs", {}) or {}),
-        )
-    return json.dumps(result, ensure_ascii=False)
+def snapshot(full: bool = True) -> dict:
+    result = _run("snapshot", "--json", timeout=60)
+    if not result.get("success"):
+        return result
+    text = result.get("snapshot", "")
+    if not full:
+        text = _truncate_text(text, SNAPSHOT_MAX_CHARS)
+    return {
+        "success": True,
+        "snapshot": text,
+        "refs": result.get("refs", {}),
+        "origin": result.get("origin", ""),
+    }
 
 
-def _browser_click(args: dict, runtime: dict) -> str:
-    ref = str(args.get("ref") or "")
+def click(ref: str) -> dict:
     if ref and not ref.startswith("@"):
         ref = "@" + ref
-    result = _run_browser(runtime.get("task_id", "default"), "click", [ref], timeout=60)
-    return json.dumps(result if not result.get("success") else {"success": True, "clicked": ref}, ensure_ascii=False)
+    result = _run("click", ref, timeout=60)
+    if not result.get("success"):
+        return result
+    return {"success": True, "clicked": ref}
 
 
-def _browser_type(args: dict, runtime: dict) -> str:
-    ref = str(args.get("ref") or "")
-    if ref and not ref.startswith("@"):
-        ref = "@" + ref
-    text = str(args.get("text") or "")
-    result = _run_browser(runtime.get("task_id", "default"), "fill", [ref, text], timeout=60)
-    return json.dumps(result if not result.get("success") else {"success": True, "typed": len(text), "ref": ref}, ensure_ascii=False)
+def type_text(text: str) -> dict:
+    result = _run("keyboard", "type", text, timeout=60)
+    if not result.get("success"):
+        return result
+    return {"success": True, "typed": len(text)}
 
 
-def _browser_scroll(args: dict, runtime: dict) -> str:
-    direction = str(args.get("direction") or "down")
-    result = _run_browser(runtime.get("task_id", "default"), "scroll", [direction, "700"], timeout=60)
-    return json.dumps(result if not result.get("success") else {"success": True, "direction": direction}, ensure_ascii=False)
+def press_key(key: str) -> dict:
+    result = _run("keyboard", "press", key, timeout=60)
+    if not result.get("success"):
+        return result
+    return {"success": True, "pressed": key}
 
 
-def _browser_back(args: dict, runtime: dict) -> str:
-    result = _run_browser(runtime.get("task_id", "default"), "back", [], timeout=60)
-    return json.dumps(result if not result.get("success") else {"success": True}, ensure_ascii=False)
+def scroll(direction: str = "down", pixels: int = 600) -> dict:
+    result = _run("scroll", direction, str(pixels), timeout=60)
+    if not result.get("success"):
+        return result
+    return {"success": True, "direction": direction, "pixels": pixels}
 
 
-_BROWSER_SCHEMAS = {
-    "browser_navigate": {
-        "description": "Navigate to a URL and return a compact accessibility snapshot with clickable refs.",
-        "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+def screenshot(path: str | None = None) -> dict:
+    args = [path] if path else []
+    result = _run("screenshot", *args, timeout=60)
+    if not result.get("success"):
+        return result
+    return {"success": True, "path": result.get("output", path or "")}
+
+
+def back() -> dict:
+    result = _run("back", timeout=60)
+    if not result.get("success"):
+        return result
+    return {"success": True}
+
+
+def close_browser() -> dict:
+    result = _run("close", timeout=15)
+    if not result.get("success"):
+        return result
+    return {"success": True}
+
+
+def search(engine: str, query: str) -> dict:
+    q = quote_plus(query)
+    urls = {
+        "google": f"https://www.google.com/search?q={q}",
+        "bing": f"https://www.bing.com/search?q={q}",
+        "baidu": f"https://www.baidu.com/s?wd={q}",
+        "reddit": f"https://www.reddit.com/search/?q={q}&sort=relevance",
+    }
+    return navigate(urls[engine])
+
+
+def _h_navigate(args: dict, _rt: dict) -> str:
+    return json_result(**navigate(args.get("url", "")))
+
+
+def _h_snapshot(args: dict, _rt: dict) -> str:
+    return json_result(**snapshot(full=bool(args.get("full", True))))
+
+
+def _h_click(args: dict, _rt: dict) -> str:
+    return json_result(**click(args.get("ref", "")))
+
+
+def _h_type(args: dict, _rt: dict) -> str:
+    return json_result(**type_text(args.get("text", "")))
+
+
+def _h_press_key(args: dict, _rt: dict) -> str:
+    return json_result(**press_key(args.get("key", "")))
+
+
+def _h_scroll(args: dict, _rt: dict) -> str:
+    return json_result(**scroll(args.get("direction", "down"), int(args.get("pixels", 600))))
+
+
+def _h_screenshot(args: dict, _rt: dict) -> str:
+    return json_result(**screenshot(args.get("path")))
+
+
+def _h_back(args: dict, _rt: dict) -> str:
+    return json_result(**back())
+
+
+def _h_close(args: dict, _rt: dict) -> str:
+    return json_result(**close_browser())
+
+
+def _h_google_search(args: dict, _rt: dict) -> str:
+    return json_result(**search("google", args.get("query", "")))
+
+
+def _h_bing_search(args: dict, _rt: dict) -> str:
+    return json_result(**search("bing", args.get("query", "")))
+
+
+def _h_baidu_search(args: dict, _rt: dict) -> str:
+    return json_result(**search("baidu", args.get("query", "")))
+
+
+def _h_reddit_search(args: dict, _rt: dict) -> str:
+    return json_result(**search("reddit", args.get("query", "")))
+
+
+registry.register("browser_navigate", {
+    "description": "Navigate to a URL and return an accessibility snapshot. Use direct search tools for search-engine queries.",
+    "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+}, _h_navigate)
+
+registry.register("browser_snapshot", {
+    "description": "Return the current page accessibility snapshot with @ref IDs. Use full=false for a compact snapshot.",
+    "parameters": {"type": "object", "properties": {"full": {"type": "boolean", "default": True}}, "required": []},
+}, _h_snapshot)
+
+registry.register("browser_click", {
+    "description": "Click an element by its @ref ID from the last snapshot, e.g. e5 or @e5.",
+    "parameters": {"type": "object", "properties": {"ref": {"type": "string"}}, "required": ["ref"]},
+}, _h_click)
+
+registry.register("browser_type", {
+    "description": "Type text into the currently focused element. Use browser_click first to focus an input.",
+    "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+}, _h_type)
+
+registry.register("browser_press_key", {
+    "description": "Press a named key such as Enter, Tab, Escape, ArrowDown, or ArrowUp.",
+    "parameters": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]},
+}, _h_press_key)
+
+registry.register("browser_scroll", {
+    "description": "Scroll the page up or down.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "direction": {"type": "string", "enum": ["up", "down"], "default": "down"},
+            "pixels": {"type": "integer", "default": 600},
+        },
+        "required": [],
     },
-    "browser_snapshot": {
-        "description": "Get a compact or full accessibility snapshot of the current page.",
-        "parameters": {"type": "object", "properties": {"full": {"type": "boolean", "default": False}}, "required": []},
-    },
-    "browser_click": {
-        "description": "Click an element by ref from a browser snapshot, such as @e5.",
-        "parameters": {"type": "object", "properties": {"ref": {"type": "string"}}, "required": ["ref"]},
-    },
-    "browser_type": {
-        "description": "Fill an input element by ref.",
-        "parameters": {"type": "object", "properties": {"ref": {"type": "string"}, "text": {"type": "string"}}, "required": ["ref", "text"]},
-    },
-    "browser_scroll": {
-        "description": "Scroll the current page up or down.",
-        "parameters": {"type": "object", "properties": {"direction": {"type": "string", "enum": ["up", "down"]}}, "required": ["direction"]},
-    },
-    "browser_back": {
-        "description": "Go back in browser history.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    },
-}
+}, _h_scroll)
 
+registry.register("browser_screenshot", {
+    "description": "Save a PNG screenshot of the current page and return the saved file path.",
+    "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []},
+}, _h_screenshot)
 
-registry.register("browser_navigate", _BROWSER_SCHEMAS["browser_navigate"], _browser_navigate)
-registry.register("browser_snapshot", _BROWSER_SCHEMAS["browser_snapshot"], _browser_snapshot)
-registry.register("browser_click", _BROWSER_SCHEMAS["browser_click"], _browser_click)
-registry.register("browser_type", _BROWSER_SCHEMAS["browser_type"], _browser_type)
-registry.register("browser_scroll", _BROWSER_SCHEMAS["browser_scroll"], _browser_scroll)
-registry.register("browser_back", _BROWSER_SCHEMAS["browser_back"], _browser_back)
+registry.register("browser_back", {
+    "description": "Go back to the previous page in browser history.",
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}, _h_back)
+
+registry.register("browser_close", {
+    "description": "Close this agent run's browser instance.",
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}, _h_close)
+
+registry.register("google_search", {
+    "description": "Search Google directly and return a browser snapshot of the result page.",
+    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+}, _h_google_search)
+
+registry.register("bing_search", {
+    "description": "Search Bing directly and return a browser snapshot of the result page. Prefer this for general web search and official pages.",
+    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+}, _h_bing_search)
+
+registry.register("baidu_search", {
+    "description": "Search Baidu directly and return a browser snapshot of the result page. Use for Chinese-language and mainland China sources.",
+    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+}, _h_baidu_search)
+
+registry.register("reddit_search", {
+    "description": "Search Reddit directly and return a browser snapshot of the result page. Use for community discussions and first-hand accounts.",
+    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+}, _h_reddit_search)

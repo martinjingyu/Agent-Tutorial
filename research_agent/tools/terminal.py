@@ -20,6 +20,8 @@ def _terminal(args: dict, runtime: dict) -> str:
         capture_output=True,
         text=True,
         timeout=timeout,
+        encoding='utf-8',
+        errors='replace',
         env=build_subprocess_env(),
     )
     stdout = proc.stdout[-20000:]

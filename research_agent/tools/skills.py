@@ -7,7 +7,6 @@ from pathlib import Path
 import yaml
 
 from ..paths import SKILLS_DIR
-from ..safety import resolve_workspace_path
 from .registry import json_result, registry
 
 VALID_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")

@@ -1,7 +1,0 @@
-{
-  "private": true,
-  "dependencies": {
-    "agent-browser": "^0.26.0"
-  }
-}
-

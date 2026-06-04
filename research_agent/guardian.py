@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import time
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -66,28 +67,40 @@ def _write_signal(
 
 def _build_worker_args(original_args: list[str], signal: dict[str, Any] | None) -> list[str]:
     """Build command-line arguments for the Worker subprocess."""
-    args = list(original_args)
+    # Flags that consume the next token as their value — must be kept in sync with cli.py
+    _FLAGS_WITH_VALUE = {"--model", "--resume", "--max-iterations"}
 
-    # If resuming from a previous session, inject --resume
-    if signal and signal.get("resume_path"):
-        # Remove any existing --resume flag first
-        args = [a for a in args if not a.startswith("--resume")]
-        args.extend(["--resume", signal["resume_path"]])
-
-    # If there's a next_prompt from the signal, append it as the prompt
-    if signal and signal.get("next_prompt"):
-        # If args already has a prompt (positional), replace it
-        positional_count = sum(1 for a in args if not a.startswith("-"))
-        if positional_count > 0:
-            # Find the last positional arg (the prompt) and replace it
-            for i in range(len(args) - 1, -1, -1):
-                if not args[i].startswith("-"):
-                    args[i] = signal["next_prompt"]
-                    break
+    # Parse into structured (flag, value_or_None) pairs and bare positionals,
+    # so flag values are never mistaken for positional args.
+    parsed: list[tuple[str, str | None]] = []
+    positionals: list[str] = []
+    i = 0
+    while i < len(original_args):
+        a = original_args[i]
+        if a in _FLAGS_WITH_VALUE and i + 1 < len(original_args):
+            parsed.append((a, original_args[i + 1]))
+            i += 2
+        elif a.startswith("-"):
+            parsed.append((a, None))
+            i += 1
         else:
-            args.append(signal["next_prompt"])
+            positionals.append(a)
+            i += 1
 
-    return args
+    if signal and signal.get("resume_path"):
+        parsed = [(f, v) for f, v in parsed if f != "--resume"]
+        parsed.append(("--resume", signal["resume_path"]))
+
+    if signal and signal.get("next_prompt"):
+        positionals = [signal["next_prompt"]]
+
+    result: list[str] = []
+    for flag, value in parsed:
+        result.append(flag)
+        if value is not None:
+            result.append(value)
+    result.extend(positionals)
+    return result
 
 
 def _print_banner(signal: dict[str, Any] | None) -> None:
@@ -107,6 +120,15 @@ def _print_banner(signal: dict[str, Any] | None) -> None:
     print()
 
 
+def _clean_pycache(root: Path) -> None:
+    """Recursively remove all __pycache__ directories under root."""
+    for cache_dir in root.rglob("__pycache__"):
+        try:
+            shutil.rmtree(cache_dir)
+        except Exception:
+            pass  # 忽略正在占用的冲突
+
+
 def run_guardian(worker_args: list[str]) -> None:
     """
     Run the Guardian loop.
@@ -117,16 +139,23 @@ def run_guardian(worker_args: list[str]) -> None:
     """
     restart_count = 0
     signal: dict[str, Any] | None = None
+    project_root = Path(__file__).resolve().parent.parent
+    project_root_str = str(project_root)
+
+    # 首次启动时清理旧的 __pycache__，避免残留 .pyc 干扰
+    _clean_pycache(project_root)
 
     while restart_count < MAX_RESTART_COUNT:
         # Build the full command
-        cmd = [sys.executable, str(Path(__file__).resolve().parent.parent / "run_research_agent.py")]
+        cmd = [sys.executable, str(project_root / "run_research_agent.py")]
         cmd.extend(_build_worker_args(worker_args, signal))
 
         # Print restart info
         if restart_count > 0:
             _print_banner(signal)
             print(f"  ↻ Restart #{restart_count} — spawning new Worker...\n")
+            # 每次 restart 前清理 __pycache__，确保新 Worker 加载的是最新 .pyc
+            _clean_pycache(project_root)
         else:
             print(f"  🚀 Starting Agent-Tutorial (Guardian mode)...\n")
 

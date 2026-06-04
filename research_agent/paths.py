@@ -5,7 +5,6 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_ROOT = Path(os.environ.get("AGENT_WORKSPACE_ROOT") or PROJECT_ROOT.parent).expanduser().resolve()
 MEMORIES_DIR = PROJECT_ROOT / "memories"
 SKILLS_DIR = PROJECT_ROOT / "skills"
 REPORTS_DIR = PROJECT_ROOT / "reports"
