@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+import fnmatch
 import json
+import time
 from pathlib import Path
 
 from ..safety import resolve_workspace_path
 from .registry import json_result, registry
+
+
+_SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv"}
+_MAX_SNIPPET_CHARS = 500
+_SEARCH_REPEAT_STATE: dict[str, tuple[tuple[object, ...], int]] = {}
+
+
+def _resolve_readable_path(raw_path: str | None) -> Path:
+    if not raw_path:
+        raise ValueError("path is required")
+    try:
+        return resolve_workspace_path(raw_path)
+    except ValueError:
+        return Path(raw_path).expanduser().resolve()
 
 
 def _extract_docx_text(path: Path) -> str:
@@ -35,11 +51,8 @@ def _extract_docx_text(path: Path) -> str:
 def _read_file(args: dict, runtime: dict) -> str:
     raw_path = args.get("path")
     max_chars = int(args.get("max_chars") or 20000)
-    # Try workspace path first; fall back to raw path for external files (e.g. skill files)
-    try:
-        path = resolve_workspace_path(raw_path)
-    except ValueError:
-        path = Path(raw_path).expanduser().resolve()
+    offset = max(0, int(args.get("offset") or 0))
+    path = _resolve_readable_path(raw_path)
     if not path.is_file():
         return json_result(success=False, error=f"File not found: {path}")
     # Handle .docx files
@@ -47,12 +60,17 @@ def _read_file(args: dict, runtime: dict) -> str:
         text = _extract_docx_text(path)
     else:
         text = path.read_text(encoding="utf-8", errors="replace")
-    truncated = len(text) > max_chars
+    total_chars = len(text)
+    page = text[offset:]
+    truncated = len(page) > max_chars
     return json_result(
         success=True,
         path=str(path),
-        content=text[:max_chars],
+        content=page[:max_chars],
+        offset=offset,
+        total_chars=total_chars,
         truncated=truncated,
+        next_offset=(offset + max_chars if truncated else None),
     )
 
 
@@ -81,26 +99,174 @@ def _list_files(args: dict, runtime: dict) -> str:
     return json_result(success=True, root=str(root), files=files, truncated=len(files) >= max_results)
 
 
-def _search_files(args: dict, runtime: dict) -> str:
-    query = str(args.get("query") or "")
-    if not query:
-        return json_result(success=False, error="query is required")
-    root = resolve_workspace_path(args.get("path") or ".")
-    max_results = int(args.get("max_results") or 50)
-    matches: list[dict[str, object]] = []
-    for path in root.rglob("*"):
-        if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
+def _coerce_int(value: object, default: int, min_value: int = 0, max_value: int | None = None) -> int:
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        parsed = default
+    parsed = max(min_value, parsed)
+    if max_value is not None:
+        parsed = min(max_value, parsed)
+    return parsed
+
+
+def _iter_search_files(root: Path, file_glob: str | None = None):
+    if root.is_file():
+        candidates = [root]
+    else:
+        candidates = root.rglob("*")
+    for path in candidates:
+        if not path.is_file():
             continue
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        if file_glob and not fnmatch.fnmatch(path.name, file_glob) and not fnmatch.fnmatch(str(path), file_glob):
+            continue
+        yield path
+
+
+def _context_window(lines: list[str], index: int, context: int) -> list[dict[str, object]]:
+    if context <= 0:
+        return []
+    start = max(0, index - context)
+    end = min(len(lines), index + context + 1)
+    return [
+        {"line": i + 1, "text": lines[i][:_MAX_SNIPPET_CHARS]}
+        for i in range(start, end)
+        if i != index
+    ]
+
+
+def _check_repeated_search(key: tuple[object, ...], runtime: dict) -> tuple[bool, str | None]:
+    task_key = str(runtime.get("task_id") or runtime.get("session_id") or "default")
+    last_key, count = _SEARCH_REPEAT_STATE.get(task_key, ((), 0))
+    count = count + 1 if last_key == key else 1
+    _SEARCH_REPEAT_STATE[task_key] = (key, count)
+    if count >= 4:
+        return False, (
+            f"BLOCKED: exact same search repeated {count} times. "
+            "The result has not changed; use the existing result, narrow the pattern, "
+            "or read_file near a returned line number."
+        )
+    if count >= 3:
+        return True, (
+            f"Warning: exact same search repeated {count} times. "
+            "Avoid re-search loops; proceed with the returned locations."
+        )
+    return True, None
+
+
+def _search_files(args: dict, runtime: dict) -> str:
+    query = str(args.get("pattern") or args.get("query") or "")
+    if not query:
+        return json_result(success=False, error="pattern/query is required")
+    target = str(args.get("target") or "content")
+    output_mode = str(args.get("output_mode") or "content")
+    file_glob = args.get("file_glob")
+    file_glob = str(file_glob) if file_glob else None
+    root = _resolve_readable_path(args.get("path") or ".")
+    limit = _coerce_int(args.get("limit", args.get("max_results")), 50, 1, 500)
+    offset = _coerce_int(args.get("offset"), 0, 0)
+    context = _coerce_int(args.get("context"), 0, 0, 20)
+    timeout = float(args.get("timeout_seconds") or 10.0)
+    search_key = (query, target, str(root), file_glob or "", limit, offset, output_mode, context)
+    ok, repeat_msg = _check_repeated_search(search_key, runtime)
+    if not ok:
+        return json_result(success=False, error=repeat_msg)
+    if not root.exists():
+        return json_result(success=False, error=f"Path not found: {root}")
+
+    deadline = time.monotonic() + timeout
+    timed_out = False
+
+    if target == "files":
+        files: list[Path] = []
+        for path in _iter_search_files(root):
+            if time.monotonic() > deadline:
+                timed_out = True
+                break
+            if fnmatch.fnmatch(path.name, query) or fnmatch.fnmatch(str(path), query) or query.lower() in path.name.lower():
+                files.append(path)
+        files.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+        page = files[offset:offset + limit]
+        return json_result(
+            success=True,
+            target="files",
+            files=[str(p) for p in page],
+            total_count=len(files),
+            truncated=len(files) > offset + limit or timed_out,
+            next_offset=(offset + limit if len(files) > offset + limit else None),
+            warning=repeat_msg,
+            timed_out=timed_out,
+        )
+
+    counts: dict[str, int] = {}
+    matches: list[dict[str, object]] = []
+    total_count = 0
+    for path in _iter_search_files(root, file_glob=file_glob):
+        if time.monotonic() > deadline:
+            timed_out = True
+            break
         try:
-            for idx, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            char_offset = 0
+            for line_index, line in enumerate(lines):
                 if query.lower() in line.lower():
-                    matches.append({"path": str(path), "line": idx, "text": line[:300]})
-                    break
+                    total_count += 1
+                    counts[str(path)] = counts.get(str(path), 0) + 1
+                    if total_count > offset and len(matches) < limit:
+                        item: dict[str, object] = {
+                            "path": str(path),
+                            "line": line_index + 1,
+                            "char_offset": char_offset,
+                            "text": line[:_MAX_SNIPPET_CHARS],
+                        }
+                        ctx = _context_window(lines, line_index, context)
+                        if ctx:
+                            item["context"] = ctx
+                        matches.append(item)
+                    if output_mode == "files_only":
+                        break
+                char_offset += len(line) + 1
         except OSError:
             continue
-        if len(matches) >= max_results:
-            break
-    return json_result(success=True, matches=matches, truncated=len(matches) >= max_results)
+
+    if output_mode == "count":
+        return json_result(
+            success=True,
+            output_mode="count",
+            counts=counts,
+            total_count=total_count,
+            truncated=timed_out,
+            warning=repeat_msg,
+            timed_out=timed_out,
+        )
+    if output_mode == "files_only":
+        files = list(counts.keys())
+        page = files[offset:offset + limit]
+        return json_result(
+            success=True,
+            output_mode="files_only",
+            files=page,
+            total_count=len(files),
+            truncated=len(files) > offset + limit or timed_out,
+            next_offset=(offset + limit if len(files) > offset + limit else None),
+            warning=repeat_msg,
+            timed_out=timed_out,
+        )
+
+    truncated = total_count > offset + limit or timed_out
+    return json_result(
+        success=True,
+        pattern=query,
+        matches=matches,
+        total_count=total_count,
+        truncated=truncated,
+        next_offset=(offset + limit if truncated else None),
+        hint=(f"Results truncated. Use offset={offset + limit}, narrow pattern, or set file_glob." if truncated else None),
+        warning=repeat_msg,
+        timed_out=timed_out,
+    )
 
 
 def _patch_file(args: dict, runtime: dict) -> str:
@@ -123,10 +289,14 @@ def _patch_file(args: dict, runtime: dict) -> str:
 registry.register(
     "read_file",
     {
-        "description": "Read a text file. Supports .txt, .md, .py, .json, .csv, .yaml, .xml, .html, .docx, and other UTF-8 text files. Paths are resolved inside the Code workspace; absolute paths can also be read when needed.",
+        "description": "Read a text file. Use offset/max_chars to read only the relevant chunk of large cache/result files. Search first with search_files when you need a specific section.",
         "parameters": {
             "type": "object",
-            "properties": {"path": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}},
+            "properties": {
+                "path": {"type": "string"},
+                "max_chars": {"type": "integer", "default": 20000},
+                "offset": {"type": "integer", "default": 0, "description": "Character offset to start reading from."},
+            },
             "required": ["path"],
         },
     },
@@ -159,11 +329,28 @@ registry.register(
 registry.register(
     "search_files",
     {
-        "description": "Search text files in the Code workspace for a query string.",
+        "description": (
+            "Agent-friendly file search. Use before read_file on large cache/results: "
+            "search by pattern, get path+line snippets, then read_file only the needed chunk. "
+            "Supports target='content' for text search and target='files' for filename search. "
+            "Use output_mode='files_only' or 'count' to reduce tokens; use context only when needed."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {"query": {"type": "string"}, "path": {"type": "string", "default": "."}, "max_results": {"type": "integer", "default": 50}},
-            "required": ["query"],
+            "properties": {
+                "pattern": {"type": "string", "description": "Case-insensitive text pattern, or glob/name pattern when target='files'."},
+                "query": {"type": "string", "description": "Backward-compatible alias for pattern."},
+                "target": {"type": "string", "enum": ["content", "files"], "default": "content"},
+                "path": {"type": "string", "default": "."},
+                "file_glob": {"type": "string", "description": "Optional file filter for content search, e.g. '*.txt' or '*.py'."},
+                "limit": {"type": "integer", "default": 50},
+                "offset": {"type": "integer", "default": 0},
+                "output_mode": {"type": "string", "enum": ["content", "files_only", "count"], "default": "content"},
+                "context": {"type": "integer", "default": 0},
+                "max_results": {"type": "integer", "default": 50, "description": "Backward-compatible alias for limit."},
+                "timeout_seconds": {"type": "number", "default": 10.0},
+            },
+            "required": [],
         },
     },
     _search_files,
