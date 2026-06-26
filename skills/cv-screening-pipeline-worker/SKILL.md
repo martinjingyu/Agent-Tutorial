@@ -1,115 +1,101 @@
 ---
 name: cv-screening-pipeline-worker
-description: Execute one task from a candidate-specific CVScreeningAgent Kanban board and verify its artifacts.
+description: Execute one task from a candidate-specific CV screening Kanban board. The agent performs the work itself using tools and skills, not by running an external script.
 ---
 
 # CV Screening Pipeline Worker
 
-Use this skill when assigned one task on a candidate-specific CV screening Kanban board.
+## 何时使用
 
-The task prompt should include a command using:
+当被分配到一个候选人 Kanban board 上的某个 task 时使用。本 skill 指导 agent 如何 agentic 地完成该 task。
 
-```text
-C:\Users\LX034\Code\CVScreeningAgent\ScreeningPipeline\kanban_task_runner.py
-```
+**核心原则**：
+- 不要调用外部 repo 的脚本（如 CVScreeningAgent 的 kanban_task_runner.py）
+- 所有工作由 agent 自己使用工具完成
+- **所有输出文件必须保存到 `candidates/{候选人姓名}/` 下**
 
-## Procedure
+## 通用流程
 
-1. Read the task prompt carefully.
-   - Identify candidate id or folder.
-   - Identify workspace.
-   - Identify runner task.
-   - Identify expected output files.
+### Step 1: 理解 Task
 
-2. Run the exact command from:
+仔细阅读 task prompt，确认：
+- **候选人姓名/标识** — 用于确定文件夹路径
+- **候选人文件夹** — `candidates/{候选人姓名}/`
+- **输入文件** — 前置 task 输出的文件路径
+- **预期输出** — 需要生成的文件列表
+- **引用的 skill** — task 的 `skill` 字段指定的 skill 名称
 
-```text
-C:\Users\LX034\Code\CVScreeningAgent
-```
+### Step 2: 加载 Skill
 
-3. Verify expected artifacts.
-   - Use `search_files` before `read_file` for large outputs or logs.
-   - Do not claim success just because the command exited; check the files.
+如果 task 有 `skill` 字段，使用 `skill_view(name='{skill}')` 加载该 skill，然后按 skill 的步骤执行。
 
-4. Handle failures narrowly.
-   - Missing input, credentials, or browser login are blockers.
-   - Small local code/config errors may be fixed once.
-   - Do not repeatedly rerun the same failing command without changing anything.
+### Step 3: 读取输入
 
-5. Finish with `respond_to_user`.
-   - Include status.
-   - Include command run.
-   - Include output file paths.
-   - Include blockers or skipped optional sections.
+使用 `read_file` 读取所有输入文件：
+- `candidates/{候选人姓名}/profile.json` — 结构化简历数据
+- 其他前置 task 的输出文件
 
-## Task-Specific Checks
+### Step 4: 执行工作
 
-### ingest_profile
+根据 task 类型和引用的 skill，使用适当的工具完成工作：
 
-Expected:
+| Task ID | 引用 Skill | 主要工具 |
+|---------|-----------|---------|
+| `ingest-profile` | `hr-recruitment/ingest-profile` | read_file, write_file |
+| `school-transcript` | `hr-recruitment/school-transcript` | browser_navigate, google_search, read_file, write_file |
+| `publication` | `hr-recruitment/publication-analysis` | browser_navigate, read_file, write_file |
+| `work-experience` | `hr-recruitment/work-experience-analysis` | browser_navigate, read_file, write_file |
+| `project-awards` | `hr-recruitment/project-awards-analysis` | browser_navigate, read_file, write_file |
+| `extra-info` | `hr-recruitment/extra-info-collection` | browser_navigate, google_search, read_file, write_file |
+| `final-report` | `hr-recruitment/stage1-screening-report` | read_file, write_file |
 
-- `stage1_profile.json`
-- `transcript*.json` when transcripts exist
-- `stage1_report.md` skeleton
+### Step 5: 输出文件
 
-### school_transcript
+**所有输出文件必须保存到 `candidates/{候选人姓名}/` 下。** 不要将候选人报告保存到 `reports/` 目录。
 
-Expected:
+### Step 6: 完成
 
-- `school_reports/**/*.md` when education exists
-- `transcript_analysis.md` when transcript data exists
+调用 `respond_to_user` 报告完成状态，包含：
+- 状态（completed / blocked / skipped / error）
+- 候选人姓名
+- 输出文件路径列表（必须是 `candidates/{候选人姓名}/` 下的路径）
+- 关键发现摘要
+- 阻塞原因（如有）
 
-### publication
-
-Expected:
-
-- `publications/*.md` when publications exist
-- If no publications exist, report it as a valid skip, not an error.
-
-### work_experience
-
-Expected:
-
-- `work_experience/*.md` when work/internship entries exist
-- If none exist, report a valid skip.
-
-### project_awards
-
-Expected:
-
-- `projects/*.md` for project evidence
-- `rewards/*.md` for awards/competitions when present
-
-### extra_info
-
-Expected:
-
-- `extra_info/*.md` for public evidence or unresolved questions
-- Valid skip when there is no useful extra info.
-
-### final_report
-
-Expected:
-
-- `stage1_report.md`
-- `stage1_verdict.json` when the decision tool succeeds
-- `timeline.md` when timeline synthesis is enabled
-
-Extra final-report requirement:
-
-- Verify `stage1_report.md` contains Markdown links to subreports where those files exist.
-- Good links look like `[成绩单分析](transcript_analysis.md)` or `[论文分析](publications/xxx.md)`.
-- If links are missing but subreport files exist, patch or regenerate the report if the task prompt allows it; otherwise report the blocker clearly.
-
-## Final Response Shape
+## 完成报告模板
 
 ```text
 Status: completed | blocked | skipped | error
-Runner task: <task>
-Candidate: <id/folder>
-Command: <command>
-Artifacts:
-- <path>
-Notes:
-- <brief facts, skips, or blockers>
+Task: <task-id>
+Candidate: <姓名>
+Output files:
+- candidates/{姓名}/<file1>
+- candidates/{姓名}/<file2>
+Key findings:
+- <发现1>
+- <发现2>
+Blockers (if any):
+- <阻塞原因>
 ```
+
+## 注意事项
+
+1. **不要调用外部脚本** — 所有工作由 agent 自己使用工具完成
+2. **所有文件保存在候选人文件夹** — `candidates/{候选人姓名}/`
+3. **使用 skill_view 加载参考 skill** — 每个 task 的 `skill` 字段指定了要加载的 skill
+4. **valid skip 不是 error** — 如某 task 无数据可分析（如无论文），记录为 skip 即可
+5. **文件间通过 Markdown 链接关联** — final-report 中的链接应指向同文件夹下的子报告
+
+## References
+
+- `cv-screening-kanban` — 上游编排 skill
+- `hr-recruitment/ingest-profile` — 简历解析 skill
+- `hr-recruitment/school-transcript` — 学校/专业调研 skill
+- `hr-recruitment/publication-analysis` — 论文分析 skill
+- `hr-recruitment/work-experience-analysis` — 工作经历分析 skill
+- `hr-recruitment/project-awards-analysis` — 项目/竞赛分析 skill
+- `hr-recruitment/extra-info-collection` — 补充信息收集 skill
+- `hr-recruitment/cv-link-deep-research` — 链接深度调研
+- `hr-recruitment/stage1-screening-report` — 最终筛选报告生成
+- `research/university-program-research` — 学校/专业调研
+- `utilities/windows-file-operations` — Windows 文件操作最佳实践

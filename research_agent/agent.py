@@ -14,7 +14,8 @@ from .prompts import build_system_prompt
 from .self_review import trigger_self_review
 from .state import new_session_id, save_session
 from .text_clean import clean_text
-from .tools import load_builtin_tools, registry
+from .tools import load_builtin_tools, registry as _global_registry
+from .tools.registry import ToolRegistry
 from .ui import ConsoleUI
 
 
@@ -80,16 +81,23 @@ class GeneralAgent:
         provider: str | None = None,
         max_iterations: int = 24,
         context_threshold_tokens: int = 90000,
+        auto_compact: bool = True,
         self_review: bool = True,
         ui: ConsoleUI | None = None,
         live_cache_path: str | Path | None = None,
         live_cache_metadata: dict[str, Any] | None = None,
+        # Extension points for downstream pipelines
+        registry: ToolRegistry | None = None,
+        finish_tools: set[str] | frozenset[str] | None = None,
+        candidate_folder: str | Path | None = None,
+        session_path: str | Path | None = None,
     ) -> None:
         ensure_project_dirs()
         load_builtin_tools()
         self.llm = LLMClient(model=model, provider=provider)
         self.max_iterations = max_iterations
         self.context_threshold_tokens = context_threshold_tokens
+        self.auto_compact = auto_compact
         self.self_review_enabled = self_review
         self.ui = ui or ConsoleUI(enabled=True)
         self.session_id = new_session_id()
@@ -102,9 +110,15 @@ class GeneralAgent:
         self.ui.session_start(self.session_id, self.task_id)
         self._pending_restart: list[str] | None = None
         self._pending_restart_prompt: str | None = None
+        self._registry = registry if registry is not None else _global_registry
+        self._finish_tools: frozenset[str] = frozenset(finish_tools) if finish_tools else frozenset()
+        self._candidate_folder = str(candidate_folder) if candidate_folder else None
+        self._session_path = Path(session_path) if session_path else None
 
     def _skills_index(self) -> str:
-        result = registry.dispatch("skills_list", {}, {"task_id": self.task_id})
+        if "skills_list" not in self._registry.names:
+            return ""
+        result = self._registry.dispatch("skills_list", {}, {"task_id": self.task_id})
         try:
             data = json.loads(result)
             lines = []
@@ -236,15 +250,17 @@ class GeneralAgent:
         compacted = compact_messages(messages, self.llm, focus=user_message)
         return self._repair_tool_sequences(compacted)
 
-    def run(self, user_message: str, history: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    def run(
+        self,
+        user_message: str,
+        history: list[dict[str, Any]] | None = None,
+        system_prompt: str | None = None,
+    ) -> dict[str, Any]:
         messages = self._repair_tool_sequences(list(history or []))
-        system_prompt = build_system_prompt(self._skills_index())
+        system_prompt = system_prompt or build_system_prompt(self._skills_index())
 
         # ── Pre-loop compact review ──────────────────────────────────────
-        # Before adding the new user message and starting the agent loop,
-        # review the conversation history to see if we've moved to a new
-        # independent task. If so, compact the history.
-        if messages:
+        if self.auto_compact and messages:
             compacted = self._pre_loop_compact_review(
                 messages, user_message, system_prompt
             )
@@ -258,7 +274,7 @@ class GeneralAgent:
         final_text = ""
 
         for iteration in range(1, self.max_iterations + 1):
-            if (
+            if self.auto_compact and (
                 iteration - self._last_trajectory_compress_iter >= TRAJECTORY_COMPRESS_MIN_GAP
                 and self._estimate_message_chars(messages) >= TRAJECTORY_COMPRESS_THRESHOLD
             ):
@@ -268,7 +284,7 @@ class GeneralAgent:
                 system_prompt = build_system_prompt(self._skills_index())
                 self._last_trajectory_compress_iter = iteration
 
-            if rough_tokens(messages, system_prompt) > self.context_threshold_tokens:
+            if self.auto_compact and rough_tokens(messages, system_prompt) > self.context_threshold_tokens:
                 self.ui.compact("context threshold exceeded")
                 messages = compact_messages(messages, self.llm, focus=user_message)
                 messages = self._repair_tool_sequences(messages)
@@ -278,7 +294,7 @@ class GeneralAgent:
             api_messages = [{"role": "system", "content": system_prompt}, *messages]
             self.ui.model_start(iteration)
             try:
-                response = self.llm.chat(api_messages, registry.definitions())
+                response = self.llm.chat(api_messages, self._registry.definitions())
             except KeyboardInterrupt:
                 correction = self._interrupt_correction()
                 if correction:
@@ -313,12 +329,13 @@ class GeneralAgent:
                 self._write_live_cache("running", messages, final_text=final_text)
 
                 # ── Pre-action compact check ──────────────────────────────
-                compacted = self._pre_action_compact_check(
-                    messages, system_prompt, user_message
-                )
-                if compacted is not None:
-                    messages = compacted
-                    system_prompt = build_system_prompt(self._skills_index())
+                if self.auto_compact:
+                    compacted = self._pre_action_compact_check(
+                        messages, system_prompt, user_message
+                    )
+                    if compacted is not None:
+                        messages = compacted
+                        system_prompt = build_system_prompt(self._skills_index())
                 # ──────────────────────────────────────────────────────────
 
                 compact_focus = None
@@ -344,10 +361,11 @@ class GeneralAgent:
                             "task_id": self.task_id,
                             "session_id": self.session_id,
                             "user_task": user_message,
+                            **({"candidate_folder": self._candidate_folder} if self._candidate_folder else {}),
                         }
                         self.ui.tool_start(tc.function.name, args)
                         try:
-                            result = registry.dispatch(tc.function.name, args, runtime)
+                            result = self._registry.dispatch(tc.function.name, args, runtime)
                         except KeyboardInterrupt:
                             result = json.dumps(
                                 {
@@ -359,6 +377,8 @@ class GeneralAgent:
                             interrupted = True
                         if runtime.get("final_response") is not None:
                             final_text = str(runtime.get("final_response") or "")
+                        if self._finish_tools and tc.function.name in self._finish_tools and not final_text:
+                            final_text = result or "Task completed."
                         if runtime.get("compact_requested"):
                             compact_focus = str(runtime["compact_requested"])
                         if runtime.get("_pending_restart"):
@@ -414,7 +434,7 @@ class GeneralAgent:
                     if final_text:
                         break
                     continue
-                if compact_focus:
+                if compact_focus and self.auto_compact:
                     self.ui.compact(compact_focus)
                     messages = compact_messages(messages, self.llm, focus=compact_focus)
                     messages = self._repair_tool_sequences(messages)
@@ -437,7 +457,15 @@ class GeneralAgent:
             self.ui.final()
 
         messages = self._repair_tool_sequences(messages)
-        session_path = save_session(self.session_id, messages)
+        default_session_path = save_session(self.session_id, messages)
+        if self._session_path:
+            self._session_path.parent.mkdir(parents=True, exist_ok=True)
+            self._session_path.write_text(
+                json.dumps(messages, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+            )
+            session_path = self._session_path
+        else:
+            session_path = default_session_path
         self._write_live_cache("completed", messages, final_text=final_text, session_path=str(session_path))
         self.ui.saved(str(session_path))
         if final_text and self.self_review_enabled:
@@ -607,7 +635,7 @@ class GeneralAgent:
         for iteration in range(1, CONTINUATION_MAX_ITERS + 1):
             api_messages = [{"role": "system", "content": build_system_prompt(self._skills_index())}, *messages]
             try:
-                response = self.llm.chat(api_messages, registry.definitions())
+                response = self.llm.chat(api_messages, self._registry.definitions())
             except Exception as exc:
                 self.ui.event("finish", f"model error: {type(exc).__name__}")
                 time.sleep(3)
@@ -656,10 +684,13 @@ class GeneralAgent:
                     runtime = {
                         "task_id": self.task_id,
                         "session_id": self.session_id,
+                        **({"candidate_folder": self._candidate_folder} if self._candidate_folder else {}),
                     }
-                    result = registry.dispatch(tc.function.name, args, runtime)
+                    result = self._registry.dispatch(tc.function.name, args, runtime)
                     if runtime.get("final_response") is not None:
                         final_text = str(runtime.get("final_response") or "")
+                    if self._finish_tools and tc.function.name in self._finish_tools and not final_text:
+                        final_text = result or "Task completed."
 
                 result = self._process_tool_result(result, tc.function.name)
                 messages.append(

@@ -1,6 +1,3 @@
-Report storage convention: reports/{学校名}/{专业名}.md. School folder uses official Chinese or English name. Multiple programs from same school go in same folder.
-§
-国内知乎、贴吧等内容平台对自动化爬取限制严格，不是可靠的信息来源，调研中不应依赖它们获取信息。
 §
 §
 Workspace root: C:\Users\LX034\Code\
@@ -10,8 +7,6 @@ JD docx file: C:\Users\LX034\Code\AI算法实习生职位JD_20250506.docx (works
 There is also a copy at Agent-Tutorial\reports\AI算法实习生职位JD_20250506.docx
 §
 Windows file operations: Python shutil.move may silently fail (no error, no move) in some cases on Windows. Use terminal tool with cmd.exe `move` command instead for reliable file moves.
-§
-CVScreeningAgent pipeline stores school research outputs in `candidates/{id}/stage1_school_major_research/` as `.txt` diagnostic files (not `.md` reports under `reports/`). The diagnostic files may be empty if no API key is configured. The stage1-screening-report skill should check both locations: `reports/{学校名}/{专业名}.md` and `candidates/{id}/stage1_school_major_research/`.
 §
 read_file tool natively supports .docx files — no need to convert to .txt first. Works for Chinese/English bilingual docx content.
 §

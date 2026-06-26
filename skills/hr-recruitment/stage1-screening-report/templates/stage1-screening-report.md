@@ -4,6 +4,7 @@
 > **应聘职位**: AI Research & Engineering Intern（AI算法实习生）
 > **筛选日期**: {date}
 > **数据来源**: profile.json + link-verification.md + 学校项目分析报告 + JD
+> **存储路径**: `candidates/{name}/stage1-screening.md`（所有候选人报告统一保存在 candidates/ 下）
 
 ---
 
@@ -147,10 +148,10 @@
 
 | 材料 | 路径 | 日期 |
 |------|------|------|
-| 简历解析数据 | `{path}/profile.json` | {date} |
-| 链接验证报告 | `{path}/link-verification.md` | {date} |
-| 学校项目分析报告 | `{path}/{report_name}.md` | {date} |
-| 职位描述 JD | `{path}/AI算法实习生职位JD_*.docx` | {date} |
+| 简历解析数据 | `candidates/{name}/profile.json` | {date} |
+| 链接验证报告 | `candidates/{name}/link-verification.md` | {date} |
+| 学校项目分析报告 | `reports/{学校名}/{专业名}.md` | {date} |
+| 职位描述 JD | `{jd_path}` | {date} |
 
 ---
 

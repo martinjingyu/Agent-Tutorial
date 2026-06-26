@@ -1,0 +1,213 @@
+{
+  "board": "cv-candidate-LeiShen",
+  "created_at": "2026-06-17T17:41:53",
+  "updated_at": "2026-06-17T17:43:16",
+  "tasks": {
+    "t_0fe5474f": {
+      "id": "t_0fe5474f",
+      "title": "解析简历并生成结构化 profile.json",
+      "prompt": "候选人: Lei Shen\n简历文件路径: C:\\Users\\LX034\\Code\\Agent-Tutorial\\workspace\\candidates\\Lei Shen\\【多模态大模型 算法工程师_深圳 400-600元_天】沈磊 30年应届生 SL_141566 实习六个月.pdf\n候选人文件夹: candidates/Lei Shen/\n\n请按 ingest-profile skill 的步骤执行：\n1. 使用 read_file 读取简历文件\n2. 提取结构化信息\n3. 输出 candidates/Lei Shen/profile.json\n4. 可选：输出 candidates/Lei Shen/profile-summary.md",
+      "skill": "hr-recruitment/ingest-profile",
+      "parents": [],
+      "status": "running",
+      "created_at": "2026-06-17T17:41:53",
+      "updated_at": "2026-06-17T17:41:55",
+      "metadata": {},
+      "max_iterations": null,
+      "provider": null,
+      "model": null,
+      "pid": 21092,
+      "cache_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\cv-candidate-LeiShen\\workers\\t_0fe5474f.json",
+      "payload_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\cv-candidate-LeiShen\\workers\\t_0fe5474f.payload.json",
+      "stdout_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\cv-candidate-LeiShen\\workers\\t_0fe5474f.stdout.txt",
+      "stderr_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\cv-candidate-LeiShen\\workers\\t_0fe5474f.stderr.txt",
+      "started_at": "2026-06-17T17:41:55"
+    },
+    "t_1a5a1b30": {
+      "id": "t_1a5a1b30",
+      "title": "调研学校/专业并分析成绩",
+      "prompt": "候选人: Lei Shen\n候选人文件夹: candidates/Lei Shen/\n\n请按 school-transcript skill 的步骤执行：\n1. 读取 candidates/Lei Shen/profile.json\n2. 调研学校和专业\n3. 分析课程与 JD 匹配度\n4. 输出 candidates/Lei Shen/school-report.md\n5. 如有成绩数据，输出 candidates/Lei Shen/transcript-analysis.md",
+      "skill": "hr-recruitment/school-transcript",
+      "parents": [
+        "t_0fe5474f"
+      ],
+      "status": "ready",
+      "created_at": "2026-06-17T17:41:53",
+      "updated_at": "2026-06-17T17:41:53",
+      "metadata": {},
+      "max_iterations": null,
+      "provider": null,
+      "model": null
+    },
+    "t_89ea4c96": {
+      "id": "t_89ea4c96",
+      "title": "分析论文/出版物",
+      "prompt": "候选人: Lei Shen\n候选人文件夹: candidates/Lei Shen/\n\n请按 publication-analysis skill 的步骤执行：\n1. 读取 candidates/Lei Shen/profile.json\n2. 提取论文/出版物列表\n3. 逐一验证论文真实性\n4. 评估学术贡献度\n5. 输出 candidates/Lei Shen/publications.md\n6. 如无论文，记录 valid skip",
+      "skill": "hr-recruitment/publication-analysis",
+      "parents": [
+        "t_0fe5474f"
+      ],
+      "status": "ready",
+      "created_at": "2026-06-17T17:41:53",
+      "updated_at": "2026-06-17T17:41:53",
+      "metadata": {},
+      "max_iterations": null,
+      "provider": null,
+      "model": null
+    },
+    "t_c8971320": {
+      "id": "t_c8971320",
+      "title": "分析工作/实习经历",
+      "prompt": "候选人: Lei Shen\n候选人文件夹: candidates/Lei Shen/\n\n请按 work-experience-analysis skill 的步骤执行：\n1. 读取 candidates/Lei Shen/profile.json\n2. 提取工作/实习经历\n3. 验证公司/岗位真实性\n4. 评估经历深度与 JD 匹配度\n5. 输出 candidates/Lei Shen/work-experience.md\n6. 如无经历，记录 valid skip",
+      "skill": "hr-recruitment/work-experience-analysis",
+      "parents": [
+        "t_0fe5474f"
+      ],
+      "status": "ready",
+      "created_at": "2026-06-17T17:41:53",
+      "updated_at": "2026-06-17T17:41:53",
+      "metadata": {},
+      "max_iterations": null,
+      "provider": null,
+      "model": null
+    },
+    "t_dc9337b2": {
+      "id": "t_dc9337b2",
+      "title": "分析项目与竞赛",
+      "prompt": "候选人: Lei Shen\n候选人文件夹: candidates/Lei Shen/\n\n请按 project-awards-analysis skill 的步骤执行：\n1. 读取 candidates/Lei Shen/profile.json\n2. 提取项目经历和竞赛/奖项\n3. 验证项目链接真实性\n4. 评估项目质量和奖项含金量\n5. 输出 candidates/Lei Shen/projects-awards.md\n6. 如无项目/奖项，记录 valid skip",
+      "skill": "hr-recruitment/project-awards-analysis",
+      "parents": [
+        "t_0fe5474f"
+      ],
+      "status": "ready",
+      "created_at": "2026-06-17T17:41:53",
+      "updated_at": "2026-06-17T17:41:53",
+      "metadata": {},
+      "max_iterations": null,
+      "provider": null,
+      "model": null
+    },
+    "t_011d577d": {
+      "id": "t_011d577d",
+      "title": "搜索补充信息",
+      "prompt": "候选人: Lei Shen\n候选人文件夹: candidates/Lei Shen/\n\n请按 extra-info-collection skill 的步骤执行：\n1. 读取 candidates/Lei Shen/ 下所有前置 task 的输出文件\n2. 识别信息缺口\n3. 搜索补充信息\n4. 输出 candidates/Lei Shen/extra-info.md",
+      "skill": "hr-recruitment/extra-info-collection",
+      "parents": [
+        "t_1a5a1b30",
+        "t_89ea4c96",
+        "t_c8971320",
+        "t_dc9337b2"
+      ],
+      "status": "ready",
+      "created_at": "2026-06-17T17:41:53",
+      "updated_at": "2026-06-17T17:41:53",
+      "metadata": {},
+      "max_iterations": null,
+      "provider": null,
+      "model": null
+    },
+    "t_cd6066a4": {
+      "id": "t_cd6066a4",
+      "title": "生成最终筛选报告",
+      "prompt": "候选人: Lei Shen\n候选人文件夹: candidates/Lei Shen/\nJD 文件路径: C:\\Users\\LX034\\Code\\Agent-Tutorial\\workspace\\candidates\\Lei Shen\\JD.txt\n\n请按 stage1-screening-report skill 的步骤执行：\n1. 读取 candidates/Lei Shen/ 下所有前置 task 的输出文件\n2. 读取 JD 文件\n3. 构建候选人画像\n4. 生成 JD 匹配度矩阵\n5. 三维度综合评估\n6. 输出 candidates/Lei Shen/stage1-screening.md\n7. 可选：输出 candidates/Lei Shen/stage1-verdict.json",
+      "skill": "hr-recruitment/stage1-screening-report",
+      "parents": [
+        "t_1a5a1b30",
+        "t_89ea4c96",
+        "t_c8971320",
+        "t_dc9337b2",
+        "t_011d577d"
+      ],
+      "status": "ready",
+      "created_at": "2026-06-17T17:41:53",
+      "updated_at": "2026-06-17T17:41:53",
+      "metadata": {},
+      "max_iterations": null,
+      "provider": null,
+      "model": null
+    }
+  },
+  "events": [
+    {
+      "time": "2026-06-17T17:41:53",
+      "kind": "task_created",
+      "task_id": "t_0fe5474f",
+      "title": "解析简历并生成结构化 profile.json",
+      "status": "ready",
+      "parents": []
+    },
+    {
+      "time": "2026-06-17T17:41:53",
+      "kind": "task_created",
+      "task_id": "t_1a5a1b30",
+      "title": "调研学校/专业并分析成绩",
+      "status": "ready",
+      "parents": [
+        "t_0fe5474f"
+      ]
+    },
+    {
+      "time": "2026-06-17T17:41:53",
+      "kind": "task_created",
+      "task_id": "t_89ea4c96",
+      "title": "分析论文/出版物",
+      "status": "ready",
+      "parents": [
+        "t_0fe5474f"
+      ]
+    },
+    {
+      "time": "2026-06-17T17:41:53",
+      "kind": "task_created",
+      "task_id": "t_c8971320",
+      "title": "分析工作/实习经历",
+      "status": "ready",
+      "parents": [
+        "t_0fe5474f"
+      ]
+    },
+    {
+      "time": "2026-06-17T17:41:53",
+      "kind": "task_created",
+      "task_id": "t_dc9337b2",
+      "title": "分析项目与竞赛",
+      "status": "ready",
+      "parents": [
+        "t_0fe5474f"
+      ]
+    },
+    {
+      "time": "2026-06-17T17:41:53",
+      "kind": "task_created",
+      "task_id": "t_011d577d",
+      "title": "搜索补充信息",
+      "status": "ready",
+      "parents": [
+        "t_1a5a1b30",
+        "t_89ea4c96",
+        "t_c8971320",
+        "t_dc9337b2"
+      ]
+    },
+    {
+      "time": "2026-06-17T17:41:53",
+      "kind": "task_created",
+      "task_id": "t_cd6066a4",
+      "title": "生成最终筛选报告",
+      "status": "ready",
+      "parents": [
+        "t_1a5a1b30",
+        "t_89ea4c96",
+        "t_c8971320",
+        "t_dc9337b2",
+        "t_011d577d"
+      ]
+    },
+    {
+      "time": "2026-06-17T17:41:55",
+      "kind": "task_spawned",
+      "task_id": "t_0fe5474f",
+      "pid": 21092
+    }
+  ]
+}

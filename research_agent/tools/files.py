@@ -48,6 +48,19 @@ def _extract_docx_text(path: Path) -> str:
         return f"[ERROR extracting .docx content: {exc}]"
 
 
+def _extract_pdf_text(path: Path) -> str:
+    try:
+        import fitz
+        doc = fitz.open(str(path))
+        pages = [page.get_text().strip() for page in doc if page.get_text().strip()]
+        doc.close()
+        return "\n\n".join(pages)
+    except ImportError:
+        return "[ERROR: PyMuPDF not installed. Run: pip install pymupdf]"
+    except Exception as exc:
+        return f"[ERROR extracting PDF: {exc}]"
+
+
 def _read_file(args: dict, runtime: dict) -> str:
     raw_path = args.get("path")
     max_chars = int(args.get("max_chars") or 20000)
@@ -55,9 +68,11 @@ def _read_file(args: dict, runtime: dict) -> str:
     path = _resolve_readable_path(raw_path)
     if not path.is_file():
         return json_result(success=False, error=f"File not found: {path}")
-    # Handle .docx files
-    if path.suffix.lower() == ".docx":
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
         text = _extract_docx_text(path)
+    elif suffix == ".pdf":
+        text = _extract_pdf_text(path)
     else:
         text = path.read_text(encoding="utf-8", errors="replace")
     total_chars = len(text)
@@ -371,5 +386,100 @@ registry.register(
         },
     },
     _patch_file,
+)
+
+
+def _read_pdf(args: dict, runtime: dict) -> str:
+    path = _resolve_readable_path(args.get("path"))
+    max_chars = int(args.get("max_chars") or 50000)
+    if not path.is_file():
+        return json_result(success=False, error=f"File not found: {path}")
+    if path.suffix.lower() != ".pdf":
+        return json_result(success=False, error=f"Not a PDF file: {path}")
+    text = _extract_pdf_text(path)
+    pages = text.split("\n\n")
+    truncated = len(text) > max_chars
+    return json_result(
+        success=True,
+        path=str(path),
+        pages=len(pages),
+        content=text[:max_chars],
+        truncated=truncated,
+    )
+
+
+def _read_url_pdf(args: dict, runtime: dict) -> str:
+    import tempfile
+    import urllib.request
+
+    url = (args.get("url") or "").strip()
+    if not url:
+        return json_result(success=False, error="url is required")
+    max_chars = int(args.get("max_chars") or 50000)
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+    except Exception as exc:
+        return json_result(success=False, error=f"Failed to download PDF: {exc}")
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = Path(tmp.name)
+        try:
+            text = _extract_pdf_text(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    except Exception as exc:
+        return json_result(success=False, error=f"Failed to extract PDF text: {exc}")
+
+    truncated = len(text) > max_chars
+    return json_result(
+        success=True,
+        url=url,
+        pages=text.count("\n\n") + 1,
+        content=text[:max_chars],
+        truncated=truncated,
+    )
+
+
+registry.register(
+    "read_pdf",
+    {
+        "description": (
+            "Extract text from a PDF file using PyMuPDF. "
+            "Returns full page text. Use for reading research papers, reports, or any PDF document."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to the PDF file"},
+                "max_chars": {"type": "integer", "default": 50000},
+            },
+            "required": ["path"],
+        },
+    },
+    _read_pdf,
+)
+
+registry.register(
+    "read_url_pdf",
+    {
+        "description": (
+            "Download and extract text from an online PDF given its URL. "
+            "Useful for reading research papers, reports, or any PDF accessible via a direct link."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Direct URL to the PDF file"},
+                "max_chars": {"type": "integer", "default": 50000},
+            },
+            "required": ["url"],
+        },
+    },
+    _read_url_pdf,
 )
 

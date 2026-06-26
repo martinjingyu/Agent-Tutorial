@@ -162,11 +162,12 @@ description: 接收结构化 CV JSON，提取其中的所有链接（GitHub、Li
 
 使用 `templates/link-verification-report.md` 生成报告。
 
-**存储路径规则**：
-- **链接验证报告** 保存在 `candidates/{id}/link-verification.md`（CVScreeningAgent pipeline 输出）
-- **工作区存档** 同时保存在 `reports/{候选人姓名}/link-verification.md`
-
-**注意**: `write_file` 工具只能写入工作区（`Agent-Tutorial/`）内路径。虽然 `CVScreeningAgent/` 与 `Agent-Tutorial/` 同属 `C:\\Users\\LX034\\Code\\` 目录，但 `write_file` 仍会拒绝写入工作区外的路径。**解决方案**：先用 `write_file` 写入 `reports/{候选人姓名}/link-verification.md`，再用 `terminal` 的 `copy` 命令复制到 `candidates/{id}/link-verification.md`。
+**存储路径规则（重要！必须遵守）**：
+- **所有报告文件必须统一保存在候选人专属文件夹下**，路径为 `candidates/{候选人姓名}/`
+- 示例：`candidates/Lei Shen/link-verification.md`
+- **绝对不要** 将候选人报告保存到 `reports/` 目录下。`reports/` 目录仅用于学校/专业调研报告（由 `university-program-research` skill 生成），不用于候选人链接验证报告。
+- 如果 `candidates/` 目录不存在，先创建它。
+- 使用 `write_file` 写入时，路径必须包含 `candidates/{候选人姓名}/` 前缀。
 
 报告包含：
 - 链接清单及状态总览

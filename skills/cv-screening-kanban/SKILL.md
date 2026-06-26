@@ -1,182 +1,151 @@
 ---
 name: cv-screening-kanban
-description: Create one Kanban board per candidate and orchestrate CVScreeningAgent stage-1 research/report tasks as a dependency graph.
+description: Create one Kanban board per candidate and orchestrate all CV screening stage-1 research/report tasks as an agentic dependency graph. Each task is executed by the agent itself (not by an external pipeline script).
 ---
 
 # CV Screening Kanban Orchestration
 
-Use this skill when the user wants the research agent to run or manage the CV screening pipeline agentically.
+## 何时使用
 
-Important design rule: **one candidate gets one Kanban board**. The tasks on that board are the candidate's internal screening workflow, not "one candidate = one task".
+当需要对一个或多个候选人执行完整的 Stage 1 简历初筛流程时使用。本 skill 将整个流程拆分为多个 Kanban task，每个 task 由 agent 自己 agentic 地完成（不依赖外部 pipeline 脚本）。
 
-The Kanban tool is generic. This skill translates CVScreening work into generic `kanban_create_pipeline` tasks.
+**核心设计原则**：
+- 每个候选人一个 Kanban board
+- 每个 task 通过 `skill` 字段引用对应的专用 skill，worker 加载 skill 后按步骤执行
+- 不调用任何外部 repo 的脚本（如 CVScreeningAgent 的 kanban_task_runner.py）
+- **所有输出文件统一保存在 `candidates/{候选人姓名}/` 下**
 
-## Board Naming
-
-Use a stable candidate-specific board name:
+## Board 命名
 
 ```text
-cv-candidate-<candidate-id-or-folder-name>
+cv-candidate-<候选人姓名或标识>
 ```
 
-Examples:
-
+示例：
 ```text
-cv-candidate-1
+cv-candidate-LeiShen
 cv-candidate-zhangsan
 ```
 
-## Candidate Task Graph
+## 候选人 Task 依赖图
 
-Create these tasks for each candidate board.
-
-1. `ingest-profile`
-   - Extract CV/transcripts.
-   - Run profile enrichment and targeted web search if needed.
-   - Produce `stage1_profile.json` and transcript JSONs.
-   - Also create `stage1_report.md` skeleton.
-
-2. `school-transcript`
-   - Depends on `ingest-profile`.
-   - Generate school/major reports and transcript analysis.
-   - Produce `school_reports/**/*.md` and `transcript_analysis.md`.
-
-3. `publication`
-   - Depends on `ingest-profile`.
-   - Analyze publications, papers, candidate author role, and evidence quality.
-   - Produce `publications/*.md`.
-
-4. `work-experience`
-   - Depends on `ingest-profile`.
-   - Analyze internships/jobs/company evidence and experience depth.
-   - Produce `work_experience/*.md`.
-
-5. `project-awards`
-   - Depends on `ingest-profile`.
-   - Analyze projects, GitHub/product evidence, awards/competitions.
-   - Produce `projects/*.md` and `rewards/*.md`.
-
-6. `extra-info`
-   - Depends on `school-transcript`, `publication`, `work-experience`, and `project-awards`.
-   - Search for extra public evidence and unresolved questions.
-   - Produce `extra_info/*.md`.
-
-7. `final-report`
-   - Depends on every report-producing task.
-   - Generate final markdown report.
-   - Must link to subreports using Markdown links.
-   - Produce `stage1_report.md`, `stage1_verdict.json`, and optionally `timeline.md`.
-
-## Runner
-
-Use this runner inside task prompts:
-
-```text
-C:\Users\LX034\Code\CVScreeningAgent\ScreeningPipeline\kanban_task_runner.py
+```
+ingest-profile (解析简历 → profile.json)
+    ├── school-transcript (学校/专业调研 + 成绩分析)
+    ├── publication (论文/出版物分析)
+    ├── work-experience (工作/实习经历分析)
+    └── project-awards (项目/竞赛分析)
+            └── extra-info (补充信息搜索)
+                    └── final-report (综合筛选报告)
 ```
 
-Run commands from:
+### 各 Task 说明
 
-```text
-C:\Users\LX034\Code\CVScreeningAgent
-```
+| Task ID | 标题 | 依赖 | 引用 Skill | 输出文件（均在 `candidates/{姓名}/` 下） |
+|---------|------|------|-----------|----------------------------------------|
+| `ingest-profile` | 简历解析 | 无 | `hr-recruitment/ingest-profile` | `profile.json`, `profile-summary.md` |
+| `school-transcript` | 学校/专业调研 | ingest-profile | `hr-recruitment/school-transcript` | `school-report.md`, `transcript-analysis.md` |
+| `publication` | 论文/出版物分析 | ingest-profile | `hr-recruitment/publication-analysis` | `publications.md` |
+| `work-experience` | 工作/实习经历分析 | ingest-profile | `hr-recruitment/work-experience-analysis` | `work-experience.md` |
+| `project-awards` | 项目/竞赛分析 | ingest-profile | `hr-recruitment/project-awards-analysis` | `projects-awards.md` |
+| `extra-info` | 补充信息搜索 | school-transcript, publication, work-experience, project-awards | `hr-recruitment/extra-info-collection` | `extra-info.md` |
+| `final-report` | 综合筛选报告 | school-transcript, publication, work-experience, project-awards, extra-info | `hr-recruitment/stage1-screening-report` | `stage1-screening.md`, `stage1-verdict.json` |
 
-Command shape:
+## 创建 Pipeline 的模板
 
-```text
-python C:\Users\LX034\Code\CVScreeningAgent\ScreeningPipeline\kanban_task_runner.py <task> <candidate> --workspace <workspace> --json
-```
-
-Available runner tasks:
-
-```text
-ingest_profile
-school_transcript
-publication
-work_experience
-project_awards
-extra_info
-final_report
-```
-
-## Generic Tool Call Template
-
-Call `kanban_create_pipeline` with `board`, `tasks`, and dependency aliases.
+使用 `kanban_create_pipeline` 创建 task 链。**每个 task 的 `skill` 字段引用对应的专用 skill**，worker 会自动加载 skill 并按步骤执行。
 
 ```json
 {
-  "board": "cv-candidate-1",
-  "default_skill": "cv-screening-pipeline-worker",
+  "board": "cv-candidate-{候选人姓名}",
   "tasks": [
     {
       "id": "ingest-profile",
-      "title": "Extract CV/transcripts and build structured profile",
-      "prompt": "Candidate: 1\nWorkspace: C:\\Users\\LX034\\Code\\CVScreeningAgent\\workspace\\candidates\nRun from C:\\Users\\LX034\\Code\\CVScreeningAgent:\npython C:\\Users\\LX034\\Code\\CVScreeningAgent\\ScreeningPipeline\\kanban_task_runner.py ingest_profile 1 --workspace C:\\Users\\LX034\\Code\\CVScreeningAgent\\workspace\\candidates --json\nExpected outputs: stage1_profile.json, transcript*.json, stage1_report.md skeleton."
+      "title": "解析简历并生成结构化 profile.json",
+      "skill": "hr-recruitment/ingest-profile",
+      "prompt": "候选人: {姓名}\n简历文件路径: {简历文件路径}\n候选人文件夹: candidates/{姓名}/\n\n请按 ingest-profile skill 的步骤执行：\n1. 使用 read_file 读取简历文件\n2. 提取结构化信息\n3. 输出 candidates/{姓名}/profile.json\n4. 可选：输出 candidates/{姓名}/profile-summary.md"
     },
     {
       "id": "school-transcript",
-      "title": "Generate school/major report and transcript analysis",
+      "title": "调研学校/专业并分析成绩",
+      "skill": "hr-recruitment/school-transcript",
       "depends_on": ["ingest-profile"],
-      "prompt": "Candidate: 1\nRun: python C:\\Users\\LX034\\Code\\CVScreeningAgent\\ScreeningPipeline\\kanban_task_runner.py school_transcript 1 --workspace C:\\Users\\LX034\\Code\\CVScreeningAgent\\workspace\\candidates --json\nExpected outputs: school_reports/**/*.md and transcript_analysis.md."
+      "prompt": "候选人: {姓名}\n候选人文件夹: candidates/{姓名}/\n\n请按 school-transcript skill 的步骤执行：\n1. 读取 candidates/{姓名}/profile.json\n2. 调研学校和专业\n3. 分析课程与 JD 匹配度\n4. 输出 candidates/{姓名}/school-report.md\n5. 如有成绩数据，输出 candidates/{姓名}/transcript-analysis.md"
     },
     {
       "id": "publication",
-      "title": "Analyze publications and paper evidence",
+      "title": "分析论文/出版物",
+      "skill": "hr-recruitment/publication-analysis",
       "depends_on": ["ingest-profile"],
-      "prompt": "Candidate: 1\nRun: python C:\\Users\\LX034\\Code\\CVScreeningAgent\\ScreeningPipeline\\kanban_task_runner.py publication 1 --workspace C:\\Users\\LX034\\Code\\CVScreeningAgent\\workspace\\candidates --json\nExpected outputs: publications/*.md, or a clear skipped/no-publications note."
+      "prompt": "候选人: {姓名}\n候选人文件夹: candidates/{姓名}/\n\n请按 publication-analysis skill 的步骤执行：\n1. 读取 candidates/{姓名}/profile.json\n2. 提取论文/出版物列表\n3. 逐一验证论文真实性\n4. 评估学术贡献度\n5. 输出 candidates/{姓名}/publications.md\n6. 如无论文，记录 valid skip"
     },
     {
       "id": "work-experience",
-      "title": "Analyze work and internship experience",
+      "title": "分析工作/实习经历",
+      "skill": "hr-recruitment/work-experience-analysis",
       "depends_on": ["ingest-profile"],
-      "prompt": "Candidate: 1\nRun: python C:\\Users\\LX034\\Code\\CVScreeningAgent\\ScreeningPipeline\\kanban_task_runner.py work_experience 1 --workspace C:\\Users\\LX034\\Code\\CVScreeningAgent\\workspace\\candidates --json\nExpected outputs: work_experience/*.md."
+      "prompt": "候选人: {姓名}\n候选人文件夹: candidates/{姓名}/\n\n请按 work-experience-analysis skill 的步骤执行：\n1. 读取 candidates/{姓名}/profile.json\n2. 提取工作/实习经历\n3. 验证公司/岗位真实性\n4. 评估经历深度与 JD 匹配度\n5. 输出 candidates/{姓名}/work-experience.md\n6. 如无经历，记录 valid skip"
     },
     {
       "id": "project-awards",
-      "title": "Analyze projects and awards",
+      "title": "分析项目与竞赛",
+      "skill": "hr-recruitment/project-awards-analysis",
       "depends_on": ["ingest-profile"],
-      "prompt": "Candidate: 1\nRun: python C:\\Users\\LX034\\Code\\CVScreeningAgent\\ScreeningPipeline\\kanban_task_runner.py project_awards 1 --workspace C:\\Users\\LX034\\Code\\CVScreeningAgent\\workspace\\candidates --json\nExpected outputs: projects/*.md and rewards/*.md."
+      "prompt": "候选人: {姓名}\n候选人文件夹: candidates/{姓名}/\n\n请按 project-awards-analysis skill 的步骤执行：\n1. 读取 candidates/{姓名}/profile.json\n2. 提取项目经历和竞赛/奖项\n3. 验证项目链接真实性\n4. 评估项目质量和奖项含金量\n5. 输出 candidates/{姓名}/projects-awards.md\n6. 如无项目/奖项，记录 valid skip"
     },
     {
       "id": "extra-info",
-      "title": "Search and write extra public evidence",
+      "title": "搜索补充信息",
+      "skill": "hr-recruitment/extra-info-collection",
       "depends_on": ["school-transcript", "publication", "work-experience", "project-awards"],
-      "prompt": "Candidate: 1\nRun: python C:\\Users\\LX034\\Code\\CVScreeningAgent\\ScreeningPipeline\\kanban_task_runner.py extra_info 1 --workspace C:\\Users\\LX034\\Code\\CVScreeningAgent\\workspace\\candidates --json\nExpected outputs: extra_info/*.md."
+      "prompt": "候选人: {姓名}\n候选人文件夹: candidates/{姓名}/\n\n请按 extra-info-collection skill 的步骤执行：\n1. 读取 candidates/{姓名}/ 下所有前置 task 的输出文件\n2. 识别信息缺口\n3. 搜索补充信息\n4. 输出 candidates/{姓名}/extra-info.md"
     },
     {
       "id": "final-report",
-      "title": "Generate final markdown screening report with links to subreports",
+      "title": "生成最终筛选报告",
+      "skill": "hr-recruitment/stage1-screening-report",
       "depends_on": ["school-transcript", "publication", "work-experience", "project-awards", "extra-info"],
-      "prompt": "Candidate: 1\nRun: python C:\\Users\\LX034\\Code\\CVScreeningAgent\\ScreeningPipeline\\kanban_task_runner.py final_report 1 --workspace C:\\Users\\LX034\\Code\\CVScreeningAgent\\workspace\\candidates --json\nFinal report requirement: stage1_report.md must summarize all evidence and include Markdown links to subreports in school_reports, transcript_analysis.md, publications, work_experience, projects, rewards, and extra_info where present. Also verify stage1_verdict.json."
+      "prompt": "候选人: {姓名}\n候选人文件夹: candidates/{姓名}/\nJD 文件路径: {JD 文件路径}\n\n请按 stage1-screening-report skill 的步骤执行：\n1. 读取 candidates/{姓名}/ 下所有前置 task 的输出文件\n2. 读取 JD 文件\n3. 构建候选人画像\n4. 生成 JD 匹配度矩阵\n5. 三维度综合评估\n6. 输出 candidates/{姓名}/stage1-screening.md\n7. 可选：输出 candidates/{姓名}/stage1-verdict.json"
     }
   ]
 }
 ```
 
-For other candidates, replace board, candidate id, and workspace in every prompt.
-
-## Dispatch Pattern
-
-Start/continue work:
+## 调度模式
 
 ```json
-{"board": "cv-candidate-1", "max_spawn": 2}
+{"board": "cv-candidate-{姓名}", "max_spawn": 1}
 ```
 
-Suggested concurrency:
+建议并发度：
+- `max_spawn=1` — 如果浏览器状态或登录状态脆弱
+- `max_spawn=2` — ingest-profile 完成后，school-transcript/publication/work-experience/project-awards 可并行
 
-- `max_spawn=1` if browser/login state or rate limits are fragile.
-- `max_spawn=2` or `3` after `ingest-profile` is done, because publication/work/project/school tasks are mostly independent.
+## 最终报告验证规则
 
-## Final Report Rules
+final-report task 完成后必须验证：
+1. `candidates/{姓名}/stage1-screening.md` 存在
+2. 报告包含 Markdown 链接引用各子报告（如 `[学校调研](school-report.md)`）
+3. 缺失的可选部分明确标注（如"无论文发表"）
+4. 结论明确：直接通过 ✅ / 可以考虑 🔶 / 不能通过 ❌
 
-The final report task must not just say "done". It must verify:
+## 注意事项
 
-- `stage1_report.md` exists.
-- The report references subreports with Markdown links where files exist.
-- `stage1_verdict.json` exists or the final report contains enough decision text for the pipeline to infer a verdict.
-- Missing optional sections are explicitly noted, e.g. "no publications found".
+1. **不要调用外部 pipeline 脚本** — 所有 task 由 agent 自己使用工具（read_file、write_file、browser_navigate、skills 等）完成
+2. **所有文件统一保存在候选人文件夹下** — `candidates/{候选人姓名}/`
+3. **每个 task 引用专用 skill** — 使用 `skill` 字段引用对应的 skill，worker 会自动加载
+4. **task 之间通过文件传递数据** — 前置 task 的输出文件是后置 task 的输入
+5. **使用 `kanban_dispatch` 推进 pipeline** — 每次调用会检查哪些 task 的依赖已满足并启动它们
 
-## Generalization Rule
+## References
 
-This is a domain-specific task template built on a general Kanban primitive. Do not add candidate/stage-specific fields to Kanban tools. Encode domain details in task prompts, skills, dependencies, and metadata.
+- `hr-recruitment/ingest-profile` — 简历解析 skill
+- `hr-recruitment/school-transcript` — 学校/专业调研 skill
+- `hr-recruitment/publication-analysis` — 论文分析 skill
+- `hr-recruitment/work-experience-analysis` — 工作经历分析 skill
+- `hr-recruitment/project-awards-analysis` — 项目/竞赛分析 skill
+- `hr-recruitment/extra-info-collection` — 补充信息收集 skill
+- `hr-recruitment/cv-link-deep-research` — 链接深度调研（被 project-awards-analysis 引用）
+- `hr-recruitment/stage1-screening-report` — 最终筛选报告 skill
+- `research/university-program-research` — 学校/专业调研（被 school-transcript 引用）
+- `utilities/windows-file-operations` — Windows 文件操作最佳实践

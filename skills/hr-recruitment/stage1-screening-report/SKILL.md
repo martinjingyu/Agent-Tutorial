@@ -60,8 +60,8 @@ JD 文件（.docx 或 .md），包含：
 ### Step 1: 读取并解析所有输入
 
 使用 `read_file` 读取以下文件：
-1. `profile.json` — 候选人结构化数据（位于 `candidates/{id}/` 下）
-2. `link-verification.md` — 链接验证报告（位于 `candidates/{id}/` 下）
+1. `profile.json` — 候选人结构化数据（位于 `candidates/{候选人姓名}/` 下）
+2. `link-verification.md` — 链接验证报告（位于 `candidates/{候选人姓名}/` 下）
 3. 学校项目分析报告 — 按以下顺序查找：
    - **首选**: `reports/{学校名}/{专业名}.md`（标准报告路径，由 `university-program-research` skill 生成）
    - **备选**: `candidates/{id}/stage1_school_major_research/`（CVScreeningAgent pipeline 输出路径，可能为 `.txt` 诊断文件）
@@ -169,13 +169,13 @@ JD 文件（.docx 或 .md），包含：
 
 使用 `templates/stage1-screening-report.md` 生成最终报告。
 
-**存储路径规则**：
-- **学校项目分析报告** 保存在 `reports/{学校名}/{专业名}.md`（由 `university-program-research` skill 生成）
-- **链接验证报告** 保存在 `candidates/{id}/link-verification.md`
-- **Stage 1 最终筛选报告** 保存在两个位置：
-  1. `reports/{候选人姓名}/stage1-screening.md`（工作区存档）
-  2. `candidates/{id}/stage1-screening.md`（CVScreeningAgent pipeline 输出）
-- 使用 `terminal` 的 `copy` 命令（Windows）或 `cp`（Linux/Mac）将报告从工作区复制到 candidates 目录
+**存储路径规则（重要！必须遵守）**：
+- **学校项目分析报告** 保存在 `reports/{学校名}/{专业名}.md`（由 `university-program-research` skill 生成，这是学校调研的通用存档，不按候选人隔离）
+- **链接验证报告** 保存在 `candidates/{候选人姓名}/link-verification.md`
+- **Stage 1 最终筛选报告** 保存在 `candidates/{候选人姓名}/stage1-screening.md`
+- **所有候选人相关的报告文件必须统一保存在候选人专属文件夹下**，即 `candidates/{候选人姓名}/`。绝对不要将候选人报告保存到 `reports/` 目录下。
+- 如果 `candidates/` 目录不存在，先创建它。
+- 使用 `write_file` 写入时，路径必须包含 `candidates/{候选人姓名}/` 前缀。
 
 ## 判定决策树
 
