@@ -64,13 +64,12 @@ class ConsoleUI:
         self._cur_iter: int = 0
         self._cur_tool: str = ""
 
-        # Dashboard integration (TTY only)
+        # Dashboard integration (TTY only) — slot is registered lazily on first model_start
         self._db = None
         if enabled and _DYNAMIC:
             try:
                 from .tui import LiveDashboard
                 self._db = LiveDashboard.get()
-                self._db.register(label)
             except Exception:
                 pass  # non-fatal — fall back to box mode
 
@@ -93,6 +92,8 @@ class ConsoleUI:
             return
         self._cur_iter = iteration
         if self._db:
+            if iteration == 1:
+                self._db.reset(self.label)   # register or re-activate; resets timer
             self._db.update(self.label, iteration=iteration, tool="🤔 model")
         else:
             self._rule(f"step {iteration} | model")

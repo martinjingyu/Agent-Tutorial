@@ -289,7 +289,11 @@ def _handle_group_discuss(args: dict, runtime: dict) -> str:
 
 
 def _handle_conclude(args: dict, runtime: dict) -> str:
-    """Record the moderator's final conclusion and close the meeting."""
+    """Record the moderator's final conclusion, close the meeting, and end the agent loop.
+
+    Setting runtime['final_response'] causes GeneralAgent to exit immediately —
+    no separate respond_to_user call is needed.
+    """
     data = _load_meeting(_meeting_id(runtime))
     conclusion = str(args.get("conclusion") or "").strip()
     data["conclusion"] = conclusion
@@ -297,12 +301,8 @@ def _handle_conclude(args: dict, runtime: dict) -> str:
     _append_transcript(data, "moderator", f"[CONCLUSION] {conclusion}")
     _save_meeting(data)
     runtime.pop("meeting_id", None)
-    return json_result(
-        success=True,
-        conclusion=conclusion,
-        meeting_id=data["meeting_id"],
-        hint="Meeting closed. Pass the conclusion to respond_to_user.",
-    )
+    runtime["final_response"] = conclusion   # triggers agent loop exit
+    return json_result(success=True, conclusion=conclusion, meeting_id=data["meeting_id"])
 
 
 # ── Registration ──────────────────────────────────────────────────────────

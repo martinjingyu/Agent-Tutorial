@@ -274,6 +274,14 @@ class GeneralAgent:
         messages.append({"role": "user", "content": user_message})
         self._write_live_cache("running", messages, final_text="")
         final_text = ""
+        # Single runtime dict shared across ALL tool calls in this run.
+        # Tools can store state here (e.g. meeting_id) and it will persist.
+        self._runtime: dict[str, Any] = {
+            "task_id":   self.task_id,
+            "session_id": self.session_id,
+            "user_task": user_message,
+            **({"candidate_folder": self._candidate_folder} if self._candidate_folder else {}),
+        }
 
         for iteration in range(1, self.max_iterations + 1):
             if self.auto_compact and (
@@ -359,12 +367,7 @@ class GeneralAgent:
                                 args = {}
                         except json.JSONDecodeError:
                             args = {}
-                        runtime = {
-                            "task_id": self.task_id,
-                            "session_id": self.session_id,
-                            "user_task": user_message,
-                            **({"candidate_folder": self._candidate_folder} if self._candidate_folder else {}),
-                        }
+                        runtime = self._runtime
                         self.ui.tool_start(tc.function.name, args)
                         try:
                             result = self._registry.dispatch(tc.function.name, args, runtime)
@@ -684,11 +687,7 @@ class GeneralAgent:
                         ensure_ascii=False,
                     )
                 else:
-                    runtime = {
-                        "task_id": self.task_id,
-                        "session_id": self.session_id,
-                        **({"candidate_folder": self._candidate_folder} if self._candidate_folder else {}),
-                    }
+                    runtime = self._runtime
                     result = self._registry.dispatch(tc.function.name, args, runtime)
                     if runtime.get("final_response") is not None:
                         final_text = str(runtime.get("final_response") or "")

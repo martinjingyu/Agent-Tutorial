@@ -64,6 +64,20 @@ class LiveDashboard:
                 self._slots[label] = _Slot(label)
                 self._order.append(label)
 
+    def reset(self, label: str) -> None:
+        """Re-activate a slot at the start of a new turn (resets timer and done flag)."""
+        with self._lock:
+            if label in self._slots:
+                s = self._slots[label]
+                s.done = False
+                s.start = time.monotonic()
+                s.tool = ""
+                s.args_preview = ""
+                s.iteration = 0
+            else:
+                self._slots[label] = _Slot(label)
+                self._order.append(label)
+
     def update(self, label: str, **kwargs) -> None:
         with self._lock:
             s = self._slots.get(label)

@@ -1,0 +1,22 @@
+{
+  "kind": "plan_subagent",
+  "status": "queued",
+  "run_id": "kanban_t_27fa65c5",
+  "cache_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\default\\workers\\t_27fa65c5.json",
+  "payload_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\default\\workers\\t_27fa65c5.payload.json",
+  "stdout_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\default\\workers\\t_27fa65c5.stdout.txt",
+  "stderr_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\default\\workers\\t_27fa65c5.stderr.txt",
+  "started_at": "2026-06-29T18:16:52",
+  "parent_session_id": "20260629_181631",
+  "parent_task_id": "task_586c98e0",
+  "provider": null,
+  "model": null,
+  "max_iterations": 30,
+  "user_prompt": "You are a Kanban worker subagent.\n\nBoard: default\nTask id: t_27fa65c5\nTitle: 测试会议：评估候选人筛选流程\n\nBefore acting, call skill_view with name='meeting_moderator' and follow that skill. If the skill is missing, continue with the task and report that gap.\n\nTask prompt:\nTopic: 讨论当前 AI 算法实习生候选人的筛选流程，评估各环节的有效性，提出改进建议。\n\nSuggested participants:\n  - 张三: 资深算法工程师，负责技术面试\n  - 李四: HR 招聘负责人\n  - 王五: 团队负责人，关注候选人综合素质\n\nYou are the meeting moderator. Load the meeting_moderator skill, then create the participants and run the discussion as you see fit. End with meeting_conclude.\n\nWork autonomously. Use tools as needed. Prefer saving durable files or reports when the task asks for output.\nEnd with respond_to_user containing a concise completion summary, files touched, and any blockers.\n",
+  "system_prompt": "",
+  "extra_tools": [
+    "meeting"
+  ],
+  "kanban_board": "default",
+  "kanban_task_id": "t_27fa65c5"
+}

@@ -1,0 +1,37 @@
+{
+  "meeting_id": "mtg_b629dbf49f",
+  "created_at": "2026-06-29T18:03:25",
+  "agenda": "",
+  "notes": "",
+  "conclusion": "",
+  "transcript": [],
+  "participants": {
+    "张三": {
+      "name": "张三",
+      "role": "资深AI算法工程师",
+      "system_prompt": "You are 张三. Role: 资深AI算法工程师.\n\nSkills and knowledge:\n注重工程能力和落地经验，关注模型部署、性能优化、代码质量、工程化实践",
+      "model": null,
+      "provider": null,
+      "max_iterations": 10,
+      "session_history": []
+    },
+    "李四": {
+      "name": "李四",
+      "role": "高校AI方向教授",
+      "system_prompt": "You are 李四. Role: 高校AI方向教授.\n\nSkills and knowledge:\n注重理论基础和学术潜力，关注数学功底、论文阅读能力、研究创新性",
+      "model": null,
+      "provider": null,
+      "max_iterations": 10,
+      "session_history": []
+    },
+    "王五": {
+      "name": "王五",
+      "role": "技术面试官",
+      "system_prompt": "You are 王五. Role: 技术面试官.\n\nSkills and knowledge:\n注重面试表现和沟通能力，关注候选人如何表达技术思路、协作能力、学习潜力",
+      "model": null,
+      "provider": null,
+      "max_iterations": 10,
+      "session_history": []
+    }
+  }
+}

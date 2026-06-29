@@ -23,8 +23,20 @@ def _write_cache(path: Path, payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _load_extra_tools(extra_tools: list[str]) -> None:
+    """Register optional tool sets requested by the task payload."""
+    for name in extra_tools:
+        if name == "meeting":
+            from .tools.meeting import register_meeting_tools
+            register_meeting_tools()
+        elif name == "kanban_wait":
+            from .tools.kanban import register_kanban_wait_complete
+            register_kanban_wait_complete()
+
+
 def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:
     prompt = str(payload.get("user_prompt") or "")
+    _load_extra_tools(payload.get("extra_tools") or [])
     agent = GeneralAgent(
         model=payload.get("model"),
         provider=payload.get("provider"),

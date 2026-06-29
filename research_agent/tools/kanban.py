@@ -105,6 +105,7 @@ def _spawn_worker(task: dict[str, Any], board: str, runtime: dict[str, Any]) -> 
         "max_iterations": task.get("max_iterations") or 16,
         "user_prompt": prompt,
         "system_prompt": "",
+        "extra_tools": task.get("extra_tools") or [],
         # Auto-advance: worker uses these to push the board forward on completion
         "kanban_board": board,
         "kanban_task_id": task["id"],
@@ -211,6 +212,7 @@ def _create_task(
     max_iterations: int | None = None,
     provider: str | None = None,
     model: str | None = None,
+    extra_tools: list[str] | None = None,
 ) -> dict[str, Any]:
     task = {
         "id": _task_id(),
@@ -225,6 +227,7 @@ def _create_task(
         "max_iterations": max_iterations,
         "provider": provider,
         "model": model,
+        "extra_tools": extra_tools or [],
     }
     data.setdefault("tasks", {})[task["id"]] = task
     _event(data, "task_created", task_id=task["id"], title=title, status=status, parents=task["parents"])
@@ -408,6 +411,19 @@ Steps:
 """
 
 
+def _polling_hint(tasks: list[dict]) -> str:
+    running = sum(1 for t in tasks if t.get("status") == "running")
+    if running:
+        return (
+            f"{running} task(s) still running. "
+            "DO NOT call kanban_list_tasks or kanban_show_task again to poll — "
+            "workers advance the board automatically. "
+            "Use kanban_notify_subscribe then respond_to_user, "
+            "or kanban_wait_complete, to handle completion."
+        )
+    return ""
+
+
 def _handle_list(args: dict, runtime: dict) -> str:
     board_name = str(args.get("board") or DEFAULT_BOARD)
     data = _load_board(board_name)
@@ -419,7 +435,9 @@ def _handle_list(args: dict, runtime: dict) -> str:
     if status_filter:
         tasks = [t for t in tasks if t.get("status") == status_filter]
     tasks.sort(key=lambda t: t.get("created_at", ""))
-    return json_result(success=True, board=board_name, tasks=tasks, count=len(tasks), synced=updates)
+    hint = _polling_hint(list(data.get("tasks", {}).values()))
+    return json_result(success=True, board=board_name, tasks=tasks, count=len(tasks),
+                       synced=updates, **({} if not hint else {"hint": hint}))
 
 
 def _handle_show(args: dict, runtime: dict) -> str:
@@ -432,7 +450,9 @@ def _handle_show(args: dict, runtime: dict) -> str:
         _save_board(data, board_name)
     if not task:
         return json_result(success=False, error=f"Task not found: {task_id}", board=board_name)
-    return json_result(success=True, board=board_name, task=task, synced=updates)
+    hint = _polling_hint(list(data.get("tasks", {}).values()))
+    return json_result(success=True, board=board_name, task=task,
+                       synced=updates, **({} if not hint else {"hint": hint}))
 
 
 def _handle_update(args: dict, runtime: dict) -> str:
@@ -505,6 +525,73 @@ def _handle_dispatch(args: dict, runtime: dict) -> str:
         board_path=str(_board_path(board_name)),
         hint=hint,
     )
+
+
+def _handle_create_meeting_task(args: dict, runtime: dict) -> str:
+    board_name   = str(args.get("board") or DEFAULT_BOARD)
+    title        = str(args.get("title") or "").strip()
+    topic        = str(args.get("topic") or "").strip()
+    participants = args.get("suggested_participants") or []
+    if not title or not topic:
+        return json_result(success=False, error="title and topic are required")
+
+    # Build moderator prompt from topic + participant suggestions
+    parts = [f"Topic: {topic}"]
+    if participants:
+        lines = "\n".join(f"  - {p}" for p in participants)
+        parts.append(f"Suggested participants:\n{lines}")
+    parts.append(
+        "You are the meeting moderator. Load the meeting_moderator skill, "
+        "then create the participants and run the discussion as you see fit. "
+        "End with meeting_conclude."
+    )
+    prompt = "\n\n".join(parts)
+
+    data = _load_board(board_name)
+    task = _create_task(
+        data,
+        title=title,
+        prompt=prompt,
+        skill="meeting_moderator",
+        parents=[str(x) for x in (args.get("parents") or [])],
+        status=str(args.get("status") or "ready"),
+        max_iterations=args.get("max_iterations") or 30,
+        provider=args.get("provider"),
+        model=args.get("model"),
+        extra_tools=["meeting"],   # always included — moderator needs meeting tools
+    )
+    _save_board(data, board_name)
+    return json_result(success=True, board=board_name, task=task,
+                       hint="Meeting task created with meeting tools pre-enabled. Call kanban_dispatch to start.")
+
+
+registry.register("kanban_create_meeting_task", {
+    "description": (
+        "Create a kanban task that runs a meeting moderator agent. "
+        "The moderator decides the discussion format dynamically (ask_one / chain / group_discuss). "
+        "You only need to specify the topic and optionally suggest participants — "
+        "the moderator handles everything else. Meeting tools are enabled automatically."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "board":   {"type": "string", "default": DEFAULT_BOARD},
+            "title":   {"type": "string", "description": "Short task title for the kanban board"},
+            "topic":   {"type": "string", "description": "What the meeting should resolve or discuss"},
+            "suggested_participants": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional list of participant descriptions, e.g. ['Alice: software architect', 'Bob: security expert']. The moderator may adjust.",
+            },
+            "parents":        {"type": "array", "items": {"type": "string"}, "description": "Task IDs this meeting depends on"},
+            "status":         {"type": "string", "enum": ["ready", "todo", "blocked"], "default": "ready"},
+            "max_iterations": {"type": "integer", "default": 30},
+            "provider":       {"type": "string"},
+            "model":          {"type": "string"},
+        },
+        "required": ["title", "topic"],
+    },
+}, _handle_create_meeting_task)
 
 
 registry.register("kanban_create_task", {
