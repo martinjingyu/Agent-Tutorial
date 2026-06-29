@@ -29,4 +29,3 @@ registry.register(
     },
     _respond_to_user,
 )
-

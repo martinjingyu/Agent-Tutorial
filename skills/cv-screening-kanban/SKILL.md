@@ -136,9 +136,15 @@ final-report task 完成后必须验证：
 3. **每个 task 引用专用 skill** — 使用 `skill` 字段引用对应的 skill，worker 会自动加载
 4. **task 之间通过文件传递数据** — 前置 task 的输出文件是后置 task 的输入
 5. **使用 `kanban_dispatch` 推进 pipeline** — 每次调用会检查哪些 task 的依赖已满足并启动它们
+6. **Kanban 不限于 CV screening** — 本 skill 的通信模式和调度模式（list→show→dispatch）同样适用于其他多步骤调研任务（如学校/教授调研、文献综述等）。只需调整 task 定义中的 `skill` 和 `prompt` 即可复用。对于学术论文/研究想法的深度调研，参见 `research/idea-deep-research` skill。
+
+## 用户沟通模式
+
+当用户询问进度（"完成了几个？"）时，参考 `references/kanban-workflow-communication.md` 中的标准流程和回答模板。核心原则：先 `kanban_list_tasks` 查看状态，如有 ready 任务再 `kanban_dispatch` 启动，并向用户清晰解释两个工具的不同角色。
 
 ## References
 
+- `references/kanban-workflow-communication.md` — Kanban 工作流用户沟通指南
 - `hr-recruitment/ingest-profile` — 简历解析 skill
 - `hr-recruitment/school-transcript` — 学校/专业调研 skill
 - `hr-recruitment/publication-analysis` — 论文分析 skill

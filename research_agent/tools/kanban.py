@@ -14,6 +14,7 @@ from .registry import json_result, registry
 
 
 KANBAN_DIR = SESSIONS_DIR / "kanban"
+NOTIFY_DIR  = KANBAN_DIR / "subscriptions"
 DEFAULT_BOARD = "default"
 READY_STATES = {"ready"}
 TERMINAL_STATES = {"done", "blocked", "error", "cancelled"}
@@ -104,6 +105,9 @@ def _spawn_worker(task: dict[str, Any], board: str, runtime: dict[str, Any]) -> 
         "max_iterations": task.get("max_iterations") or 16,
         "user_prompt": prompt,
         "system_prompt": "",
+        # Auto-advance: worker uses these to push the board forward on completion
+        "kanban_board": board,
+        "kanban_task_id": task["id"],
     }
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
@@ -303,7 +307,10 @@ def _handle_create_pipeline(args: dict, runtime: dict) -> str:
         tasks=created,
         alias_to_id=alias_to_id,
         board_path=str(_board_path(board_name)),
-        next_step="Call kanban_dispatch with this board. Repeat later to sync running workers and start newly-ready tasks.",
+        next_step=(
+            "Call kanban_dispatch once to start workers, then call respond_to_user to end this turn. "
+            "DO NOT call kanban_dispatch repeatedly — workers run in the background."
+        ),
     )
 
 
@@ -372,7 +379,10 @@ def _handle_create_cv_pipeline(args: dict, runtime: dict) -> str:
         created_count=len(created),
         tasks=created,
         board_path=str(_board_path(board_name)),
-        next_step="Call kanban_dispatch with this board. Repeat until no running/ready tasks remain.",
+        next_step=(
+            "Call kanban_dispatch once to start workers, then call respond_to_user to end this turn. "
+            "DO NOT call kanban_dispatch repeatedly — workers run in the background."
+        ),
     )
 
 
@@ -471,6 +481,20 @@ def _handle_dispatch(args: dict, runtime: dict) -> str:
         if t.get("status") in READY_STATES and _parents_done(tasks, t)
     ]
     running = [t["id"] for t in tasks.values() if t.get("status") == "running"]
+    if running or remaining_ready:
+        hint = (
+            f"Workers running in background — running={len(running)}, ready={len(remaining_ready)}. "
+            "DO NOT call kanban_dispatch again. "
+            "Call respond_to_user to end this turn; the user will resume when ready."
+        )
+    else:
+        all_tasks = list(tasks.values())
+        n_done    = sum(1 for t in all_tasks if t.get("status") == "done")
+        n_blocked = sum(1 for t in all_tasks if t.get("status") in ("blocked", "error", "cancelled"))
+        hint = (
+            f"Pipeline complete. done={n_done}, blocked/error={n_blocked}. "
+            "No need to call kanban_dispatch again unless you add more tasks."
+        )
     return json_result(
         success=True,
         board=board_name,
@@ -479,7 +503,7 @@ def _handle_dispatch(args: dict, runtime: dict) -> str:
         running=running,
         ready=remaining_ready,
         board_path=str(_board_path(board_name)),
-        hint="Call kanban_dispatch again later to sync completed workers and spawn newly-ready dependent tasks.",
+        hint=hint,
     )
 
 
@@ -583,6 +607,223 @@ registry.register("kanban_update_task", {
         "required": ["task_id"],
     },
 }, _handle_update)
+
+def _handle_wait_complete(args: dict, runtime: dict) -> str:
+    """Blocking wait — polls until all board tasks reach a terminal state.
+
+    No LLM calls are made during the wait.  Intended for non-interactive
+    contexts (subprocesses, batch pipelines) where blocking is acceptable.
+    NOT registered by default; call register_kanban_wait_complete() to opt in.
+    """
+    import time as _time
+
+    board_name = str(args.get("board") or DEFAULT_BOARD)
+    timeout    = float(args.get("timeout") or 3600)
+    poll       = float(args.get("poll_interval") or 3.0)
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        data = _load_board(board_name)
+        _sync_running(data)
+        _save_board(data, board_name)
+        all_tasks = list(data["tasks"].values())
+        still_active = any(
+            t.get("status") not in TERMINAL_STATES and t.get("status") != "done"
+            for t in all_tasks
+        )
+        if not still_active:
+            n_done  = sum(1 for t in all_tasks if t.get("status") == "done")
+            n_error = sum(1 for t in all_tasks if t.get("status") in ("error", "blocked", "cancelled"))
+            summaries = [
+                {
+                    "id":     t["id"],
+                    "title":  t.get("title"),
+                    "status": t.get("status"),
+                    "final":  (t.get("final") or "")[:500],
+                }
+                for t in sorted(all_tasks, key=lambda t: t.get("created_at", ""))
+            ]
+            return json_result(
+                success=True, board=board_name,
+                done=n_done, error=n_error, tasks=summaries,
+                hint="All tasks complete. Review results and continue.",
+            )
+        _time.sleep(poll)
+
+    return json_result(
+        success=False, error="timeout", board=board_name,
+        hint="Pipeline timed out — some tasks may still be running.",
+    )
+
+
+def register_kanban_wait_complete() -> None:
+    """Opt-in: register the blocking kanban_wait_complete tool.
+
+    Call this once at startup in non-interactive contexts (e.g. ScreeningPipeline).
+    Do NOT call in interactive CLI agents — use kanban_notify_subscribe instead.
+    """
+    registry.register(
+        "kanban_wait_complete",
+        {
+            "description": (
+                "Block and wait for ALL tasks on a Kanban board to finish. "
+                "Polls the board every poll_interval seconds without using LLM tokens. "
+                "Returns full task results when the pipeline is complete. "
+                "Use this instead of kanban_notify_subscribe in batch/subprocess contexts."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "board":          {"type": "string", "default": DEFAULT_BOARD},
+                    "timeout":        {"type": "number", "default": 3600, "description": "Max seconds to wait."},
+                    "poll_interval":  {"type": "number", "default": 3.0,  "description": "Seconds between status checks."},
+                },
+                "required": [],
+            },
+        },
+        _handle_wait_complete,
+    )
+
+
+def _handle_notify_subscribe(args: dict, runtime: dict) -> str:
+    board_name = str(args.get("board") or DEFAULT_BOARD)
+    events     = args.get("events") or ["pipeline_complete"]
+    on_complete_prompt = str(args.get("on_complete_prompt") or "").strip()
+    sub_id = _task_id("sub")
+    sub = {
+        "sub_id":            sub_id,
+        "board":             board_name,
+        "events":            events,
+        "on_complete_prompt": on_complete_prompt,
+        "subscribed_at":     _now(),
+    }
+    NOTIFY_DIR.mkdir(parents=True, exist_ok=True)
+    (NOTIFY_DIR / f"{board_name}_{sub_id}.json").write_text(
+        json.dumps(sub, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return json_result(
+        success=True,
+        sub_id=sub_id,
+        board=board_name,
+        hint=(
+            "Subscription active. Call respond_to_user now to end this turn. "
+            "You will be notified automatically when the pipeline completes."
+        ),
+    )
+
+
+def fire_notifications(board_name: str, data: dict[str, Any]) -> None:
+    """Called by subprocess_worker when a board reaches completion.
+
+    Writes a pending-event file for each matching subscription.
+    The pending file is read by GeneralAgent.run() on the next invocation
+    and injected into the conversation history so the agent can review results.
+    Subscriptions are one-shot: deleted after firing.
+    """
+    if not NOTIFY_DIR.exists():
+        return
+    all_tasks = list(data.get("tasks", {}).values())
+    n_done    = sum(1 for t in all_tasks if t.get("status") == "done")
+    n_error   = sum(1 for t in all_tasks if t.get("status") in ("error", "blocked", "cancelled"))
+    task_summaries = [
+        {"id": t["id"], "title": t.get("title"), "status": t.get("status"),
+         "final": (t.get("final") or "")[:300]}
+        for t in sorted(all_tasks, key=lambda t: t.get("created_at", ""))
+    ]
+
+    for sub_file in sorted(NOTIFY_DIR.glob(f"{board_name}_sub_*.json")):
+        try:
+            sub = json.loads(sub_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if "pipeline_complete" not in sub.get("events", []):
+            continue
+
+        pending = {
+            "event":             "pipeline_complete",
+            "board":             board_name,
+            "fired_at":          _now(),
+            "sub_id":            sub.get("sub_id"),
+            "on_complete_prompt": sub.get("on_complete_prompt") or "",
+            "summary":           {"done": n_done, "error": n_error},
+            "tasks":             task_summaries,
+        }
+        pending_path = NOTIFY_DIR / f"{board_name}_pending_{sub['sub_id']}.json"
+        pending_path.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
+        sub_file.unlink(missing_ok=True)
+
+        # Also print a one-liner so the user knows to resume the agent
+        sys.stdout.write(
+            f"\n[kanban] Board '{board_name}' complete — "
+            f"done={n_done}, error={n_error}. Resume your agent to review.\n"
+        )
+        sys.stdout.flush()
+
+
+def consume_pending_notifications() -> list[dict[str, Any]]:
+    """Read all pending notification files and return them as injected messages.
+
+    Called by GeneralAgent.run() at startup.  Each pending event becomes a
+    tool-result-style message in history so the agent sees it naturally.
+    Pending files are deleted after reading (one-shot).
+    """
+    if not NOTIFY_DIR.exists():
+        return []
+    messages: list[dict[str, Any]] = []
+    for pending_file in sorted(NOTIFY_DIR.glob("*_pending_*.json")):
+        try:
+            event = json.loads(pending_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        board    = event.get("board", "?")
+        summary  = event.get("summary", {})
+        tasks    = event.get("tasks", [])
+        extra    = event.get("on_complete_prompt", "")
+        task_lines = "\n".join(
+            f"  [{t['status']}] {t['title']}: {t['final']}" for t in tasks
+        )
+        content = (
+            f"[kanban notification] Board '{board}' pipeline_complete\n"
+            f"done={summary.get('done',0)}, error={summary.get('error',0)}\n\n"
+            f"Task results:\n{task_lines}"
+        )
+        if extra:
+            content += f"\n\nRequested follow-up: {extra}"
+        messages.append({"role": "user", "content": content})
+        pending_file.unlink(missing_ok=True)
+    return messages
+
+
+registry.register("kanban_notify_subscribe", {
+    "description": (
+        "Subscribe to kanban board events so the agent does NOT need to poll. "
+        "After calling this, call respond_to_user to end the turn. "
+        "A notification subprocess will automatically fire when the pipeline completes, "
+        "printing results to the terminal without requiring agent intervention."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "board": {
+                "type": "string",
+                "default": DEFAULT_BOARD,
+                "description": "Board to watch.",
+            },
+            "events": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["pipeline_complete"]},
+                "default": ["pipeline_complete"],
+                "description": "Event types to subscribe to.",
+            },
+            "on_complete_prompt": {
+                "type": "string",
+                "description": "Optional: extra instruction injected into the notification agent's prompt.",
+            },
+        },
+        "required": [],
+    },
+}, _handle_notify_subscribe)
+
 
 registry.register("kanban_dispatch", {
     "description": "Sync running Kanban workers, then spawn ready tasks whose parents are done. Call repeatedly to advance a pipeline.",

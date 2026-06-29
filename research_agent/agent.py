@@ -110,6 +110,7 @@ class GeneralAgent:
         self.ui.session_start(self.session_id, self.task_id)
         self._pending_restart: list[str] | None = None
         self._pending_restart_prompt: str | None = None
+        load_builtin_tools()
         self._registry = registry if registry is not None else _global_registry
         self._finish_tools: frozenset[str] = frozenset(finish_tools) if finish_tools else frozenset()
         self._candidate_folder = str(candidate_folder) if candidate_folder else None
@@ -258,6 +259,7 @@ class GeneralAgent:
     ) -> dict[str, Any]:
         messages = self._repair_tool_sequences(list(history or []))
         system_prompt = system_prompt or build_system_prompt(self._skills_index())
+
 
         # ── Pre-loop compact review ──────────────────────────────────────
         if self.auto_compact and messages:
@@ -467,6 +469,7 @@ class GeneralAgent:
         else:
             session_path = default_session_path
         self._write_live_cache("completed", messages, final_text=final_text, session_path=str(session_path))
+        self.ui.final_answer(final_text, iteration)
         self.ui.saved(str(session_path))
         if final_text and self.self_review_enabled:
             trigger_self_review(

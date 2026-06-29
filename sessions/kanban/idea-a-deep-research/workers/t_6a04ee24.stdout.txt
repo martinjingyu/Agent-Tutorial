@@ -1,0 +1,8 @@
+MuPDF error: syntax error: could not parse color space (383 0 R)
+
+MuPDF error: syntax error: could not parse color space (383 0 R)
+
+MuPDF error: syntax error: could not parse color space (759 0 R)
+
+MuPDF error: syntax error: could not parse color space (759 0 R)
+

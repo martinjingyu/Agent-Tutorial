@@ -1,0 +1,17 @@
+{
+  "kind": "plan_subagent",
+  "status": "queued",
+  "run_id": "kanban_t_5e05213d",
+  "cache_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\default\\workers\\t_5e05213d.json",
+  "payload_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\default\\workers\\t_5e05213d.payload.json",
+  "stdout_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\default\\workers\\t_5e05213d.stdout.txt",
+  "stderr_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\kanban\\default\\workers\\t_5e05213d.stderr.txt",
+  "started_at": "2026-06-29T12:19:25",
+  "parent_session_id": "20260629_120129",
+  "parent_task_id": "task_64e9c268",
+  "provider": null,
+  "model": null,
+  "max_iterations": 16,
+  "user_prompt": "You are a Kanban worker subagent.\n\nBoard: default\nTask id: t_5e05213d\nTitle: Agent LLM 方向文献综述\n\nParent tasks already completed: ['t_d160fb74']\n\nTask prompt:\n基于 Kai-Wei Chang 的研究方向，对 Agent LLM 领域进行文献综述。重点关注以下子方向：\n1. **Tool Calling & Function Calling**: 当前主流方法（Toolformer, Gorilla, ToolLLM, AnyTool 等）\n2. **Planning & Reasoning in Agents**: ReAct, Tree-of-Thought, Graph-of-Thought, Plan-and-Solve\n3. **Action Trajectory Optimization**: 行为克隆、强化学习、DPO 在 agent 轨迹上的应用\n4. **Agent Training Methods**: Agent Lumos 的 modular training, DACO 的 data-centric 方法\n5. **Multi-Agent Systems**: 多 agent 协作、通信拓扑\n6. **Evaluation of Agents**: 主流 benchmark (AgentBench, WebArena, SWE-bench 等)\n\n对于每个子方向，列出：代表性论文、核心贡献、当前局限/未解决问题。输出报告到 reports/agent-llm-literature-review.md\n\nWork autonomously. Use tools as needed. Prefer saving durable files or reports when the task asks for output.\nEnd with respond_to_user containing a concise completion summary, files touched, and any blockers.\n",
+  "system_prompt": ""
+}

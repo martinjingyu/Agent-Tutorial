@@ -1,0 +1,424 @@
+[
+  {
+    "role": "user",
+    "content": "候选人：夏天泽\n\n## 缺失链接分析（仅供参考，请自行判断）\n  - 候选人：无 GitHub 个人主页链接\n  - 项目「基于扩散模型的层次化视觉记忆系统研究」：无 GitHub 链接\n  - 项目「多模态大模型幻觉缓解方法研究（SHARP）」：无 GitHub 链接, 疑似有论文未标注\n  - 项目「大模型幻觉检测方法研究（D2HScore）」：无 GitHub 链接\n\n## 当前 Profile JSON（完整内容）\n```json\n{\n  \"candidate\": {\n    \"name\": \"夏天泽\",\n    \"emails\": [\n      \"xiatianze22@mails.ucas.ac.cn\"\n    ],\n    \"phones\": [\n      \"15262483048\"\n    ],\n    \"locations\": [],\n    \"links\": []\n  },\n  \"education\": [\n    {\n      \"degree_level\": \"bachelor\",\n      \"institution\": \"中国科学院大学\",\n      \"major\": \"计算机科学与技术\",\n      \"start_date\": \"2022年9月\",\n      \"end_date\": \"2026年6月\",\n      \"is_current\": true,\n      \"gpa\": {\n        \"value\": 3.91,\n        \"scale\": 4.0,\n        \"raw_text\": \"GPA：3.91/4.00 | 排名：4/87\"\n      },\n      \"scores\": [\n        {\n          \"type\": \"TOEFL\",\n          \"value\": \"104\",\n          \"raw_text\": \"英语(TOEFL 104)\"\n        }\n      ],\n      \"honors\": []\n    },\n    {\n      \"degree_level\": \"other\",\n      \"institution\": \"加州大学伯克利分校（UC Berkeley）\",\n      \"start_date\": \"2025年1月\",\n      \"end_date\": \"2025年5月\",\n      \"is_current\": false,\n      \"scores\": [],\n      \"honors\": [],\n      \"others\": {\n        \"type\": \"访问学生\"\n      }\n    }\n  ],\n  \"work_experience\": [],\n  \"projects\": [\n    {\n      \"name\": \"基于扩散模型的层次化视觉记忆系统研究\",\n      \"type\": \"research\",\n      \"start_date\": \"2025年9月\",\n      \"end_date\": \"2026年5月\",\n      \"description\": \"针对现有多模态大模型无法有效处理超长视频流输入的问题，提出基于扩散模型（FLUX）的生成式视觉记忆架构，将视觉信息内化到LoRA参数中，实现海量视觉信息的高密度压缩与可视化重构。设计并实现“清醒-睡眠”双周期记忆架构，将记忆分为工作、情节与长期记忆三层，实现清醒期流式感知提取，睡眠期异步记忆巩固的“学忆一体”范式。设计基于LoRA秩演进的学习机制，使长期记忆的Rank随着学习动态平滑增长。引入LLM-as-Judge多维度惊奇度评分机制，捕获惊奇事件，并训练低秩的LoRA作为情节记忆。在睡眠期利用经验回放将其巩固进长期记忆，有效克服灾难性遗忘。获评优秀毕业论文。完成搭建生成式回忆原型系统，在自建的20+小时的长视频数据集上跑通全链路，将约61GB的视频压缩至约2.1GB的LoRA权重中（约为原来的3.4%），实现语义检索、时序定位以及画面重构。\",\n      \"tech_stack\": [],\n      \"links\": [],\n      \"others\": {\n        \"advisor\": \"山世光\",\n        \"institution\": \"中国科学院计算机技术研究所\"\n      }\n    },\n    {\n      \"name\": \"多模态大模型幻觉缓解方法研究（SHARP）\",\n      \"type\": \"research\",\n      \"start_date\": \"2024年9月\",\n      \"end_date\": \"2025年5月\",\n      \"description\": \"针对视觉语言大模型的幻觉问题，提出并实现一种无需额外训练的轻量化干预方案，在保证模型推理效率的同时降低幻觉率。修改LLaVA-v1.5的推理层代码，计算每层神经元对于幻觉输出的激活概率熵，定位与幻觉高度相关的神经元层；部署了LLaVA-v1.5、Qwen-VL等模型，在其上复现VCD、VTI方法，完成基线实验。方法在LLaVA-v1.5上取得SOTA表现，在CHAIR幻觉评测指标上较VCD降低近50%，较VTI降低近30%。论文已被EMNLP 2025 Main Conference接收。\",\n      \"tech_stack\": [],\n      \"links\": [],\n      \"others\": {\n        \"advisor\": \"刘强\",\n        \"institution\": \"中国科学院自动化研究所\"\n      }\n    },\n    {\n      \"name\": \"大模型幻觉检测方法研究（D2HScore）\",\n      \"type\": \"research\",\n      \"start_date\": \"2025年6月\",\n      \"end_date\": \"2025年9月\",\n      \"description\": \"基于大模型在幻觉与非幻觉输出时的表示差异，设计并验证一种无需训练的轻量化幻觉检测方案。设计对新提出的评价指标的不同归一化融合，并对融合系数进行消融实验，得到最终的评价指标；主导基线实验的设计和实施，并在LLaMA2、LLaMA3.1、Qwen1.5等模型上完成基线实验；在GSM8K、TheoremQA、MMLU、Belebele及MGSM等5个跨任务数据集上进行主实验，并负责部分论文撰写。实验结果显示，D2HScore在部分模型和数据集上显著超过了基线方法。在TheoremQA任务中，将LLaMA2-7B的AUPR指标从12.77提升至19.73。\",\n      \"tech_stack\": [],\n      \"links\": [],\n      \"others\": {\n        \"advisor\": \"刘强\",\n        \"institution\": \"中国科学院自动化研究所\"\n      }\n    }\n  ],\n  \"publications\": [\n    {\n      \"title\": \"SHARP: Steering hallucination in LVLMs via representation engineering\",\n      \"venue\": \"Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing\",\n      \"year\": \"2025\",\n      \"link\": \"\",\n      \"others\": {\n        \"authors\": \"Wu, J., Ding, Y., Liu, G., Xia, T., Huang, Z., Sui, D., Liu, Q., Wu, S., Wang, L., & Tan, T.\"\n      }\n    },\n    {\n      \"title\": \"D²HScore: Reasoning-aware hallucination detection via semantic breadth and depth analysis in LLMs\",\n      \"venue\": \"arXiv preprint arXiv:2509.11569\",\n      \"year\": \"2025\",\n      \"link\": \"https://arxiv.org/abs/2509.11569\",\n      \"others\": {\n        \"authors\": \"Ding, Y.*, Zhu, X.*, Xia, T.*, Wu, J., Chen, X., Liu, Q., & Wang, L.\"\n      }\n    }\n  ],\n  \"awards\": [\n    \"优秀毕业论文\"\n  ],\n  \"skills\": {\n    \"programming_languages\": [\n      \"Python\",\n      \"C\",\n      \"C++\",\n      \"Verilog\"\n    ],\n    \"frameworks\": [\n      \"PyTorch\",\n      \"TensorFlow\",\n      \"Hugging Face\"\n    ],\n    \"tools\": [\n      \"Git\",\n      \"GitHub\"\n    ],\n    \"domains\": []\n  }\n}\n```\n\n更新后请将修改后的完整 JSON 写回：\nC:\\Users\\LX034\\Code\\CVScreeningAgent\\workspace\\candidates\\Tianze Xia-6.23-12\\stage1_profile.json"
+  },
+  {
+    "role": "assistant",
+    "content": "Let me start by searching for the candidate's GitHub profile and project links.",
+    "tool_calls": [
+      {
+        "id": "call_00_VOEUNMOTAOXDBh12vIzw3038",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"夏天泽 github\"}"
+        }
+      },
+      {
+        "id": "call_01_KZwSGDE2D7xe3LIgBvIC0420",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"xiatianze\\\" github\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_VOEUNMOTAOXDBh12vIzw3038",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"夏天泽 github\", \"results\": [{\"title\": \"夏天summerjava\", \"url\": \"https://github.com/summerjava\", \"snippet\": \"知乎「夏天」/公众号『编程学习指南』/个人微信「夏天」/小红书「夏天」; 致力于分享干货，为每一位计算机CS学子学习道路上带来帮助. Programming languages and ...\"}, {\"title\": \"The OWASP Cheat Sheet Series was created to provide a ...\", \"url\": \"https://github.com/OWASP/CheatSheetSeries\", \"snippet\": \"\"}, {\"title\": \"Where software is built\", \"url\": \"https://github.com/orgs/apereo/followers\", \"snippet\": \"GitHub is where people build software. More than 150 million people use GitHub to discover, fork, and contribute to over 420 million projects.\"}, {\"title\": \"OWASP Top Ten Web Application Security Risks\", \"url\": \"https://owasp.org/www-project-top-ten/\", \"snippet\": \"项目组长：王颉（wangj@owasp.org.cn） · 翻译人员：陈亮、王厚奎、王颉、王文君、王晓飞、吴楠、徐瑞祝、夏天泽、杨璐、张剑钟、赵学文（排名不分先后，按姓氏拼音排列） · 审查 ...\"}, {\"title\": \"OWASP\", \"url\": \"https://github.com/owasp\", \"snippet\": \"\"}, {\"title\": \"GitHub - tanjiti/sec_profile: 爬取secwiki和 ...\", \"url\": \"https://github.com/tanjiti/sec_profile\", \"snippet\": \"\"}, {\"title\": \"Publications - Bin Lin\", \"url\": \"https://binlin.info/publications.html\", \"snippet\": \"Journal Papers. On the Reruns of GitHub Actions Workflows. Jiangnan Huang, Bin Lin TOSEM 2026 BibTex PDF · Understanding Self-Admitted Technical Debt in ...\"}, {\"title\": \"ml4se/README.md at master\", \"url\": \"https://github.com/saltudelft/ml4se/blob/master/README.md\", \"snippet\": \"\"}, {\"title\": \"Zhiwei Li - GitHub Pages\", \"url\": \"https://lzwjava.github.io/\", \"snippet\": \"\"}]}"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_01_KZwSGDE2D7xe3LIgBvIC0420",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"xiatianze\\\" github\", \"results\": [{\"title\": \"[CVPR2026] DriveLaW: Unifying Planning and Video ...\", \"url\": \"https://github.com/xiaomi-research/drivelaw\", \"snippet\": \"If you have any questions, please contact Tianze Xia via email (xiatianze@hust.edu.cn). Acknowledgments. DriveLaW is inspired by the following outstanding ...\"}, {\"title\": \"Unifying Planning and Video Generation in a Latent Driving ...\", \"url\": \"https://openaccess.thecvf.com/content/CVPR2026/papers/Xia_DriveLaW_Unifying_Planning_and_Video_Generation_in_a_Latent_Driving_CVPR_2026_paper.pdf\", \"snippet\": \"Code available at https://github.com/xiaomi- research/drivelaw. 1. Introduction ... Xia (xiatianze@hust.edu.cn), Y. Li (liyk@hust.edu.cn) and L. Zhou ...\"}, {\"title\": \"DriveLaW: Unifying Planning and Video Generation in a ...\", \"url\": \"https://arxiv.org/html/2512.23421v3\", \"snippet\": \"Code available at https://github.com/xiaomi-research/drivelaw. † †footnotetext: ∗ Equal contribution: T. Xia (xiatianze@hust.edu.cn), Y. Li ...\"}, {\"title\": \"DriveLaW:Unifying Planning and Video Generation in a ...\", \"url\": \"https://arxiv.org/pdf/2512.23421\", \"snippet\": \"Code available at https://github.com/xiaomi- · research/drivelaw. 1. Introduction ... Xia (xiatianze@hust.edu.cn), Y. Li (liyk@hust.edu.cn) and L. Zhou ...\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "The first search result for \"夏天泽 github\" shows an OWASP contributor mention, but that's likely a different person. Let me search more specifically for the candidate's GitHub handle.",
+    "tool_calls": [
+      {
+        "id": "call_00_hzQIvydRth8iQbAX20UP6362",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"xiatianze22\\\" github\"}"
+        }
+      },
+      {
+        "id": "call_01_gTtLPM3OlanighFwjNuc6880",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"夏天泽\\\" \\\"中国科学院\\\" github\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_hzQIvydRth8iQbAX20UP6362",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"xiatianze22\\\" github\", \"results\": []}"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_01_gTtLPM3OlanighFwjNuc6880",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"夏天泽\\\" \\\"中国科学院\\\" github\", \"results\": [{\"title\": \"中国科学院大学2019-2020春季学期计算机网络实验课\", \"url\": \"https://github.com/Therock90421/19-20-Computer_network_lab\", \"snippet\": \"\"}, {\"title\": \"中国科学院大学，《漏洞利用与攻防实践》，霍玮\", \"url\": \"https://github.com/LittleNewton/ucas_exploit_practice\", \"snippet\": \"\"}, {\"title\": \"中国科学院大学计算机科学与技术专业2026届优秀应届本科 ...\", \"url\": \"https://scce.ucas.ac.cn/index.php/zh-CN/tzgg/3599-2026-2?task=down&fid=Ut%2B8tZK3%2FgS5096ZQmzeNQ%3D%3D\", \"snippet\": \"\"}, {\"title\": \"安杰-中国科学院大学-UCAS\", \"url\": \"https://people.ucas.edu.cn/~anjie?language=en\", \"snippet\": \"\"}, {\"title\": \"ucas Network lab. 中国科学院大学计算机网络实验\", \"url\": \"https://github.com/guojiantao/NetWork\", \"snippet\": \"Repository files navigation. README. Author:郭建涛@中国科学院大学邮箱：guojiantao15@mails.ucas.ac.cn 说明：计算机网络实验系列。若遇到压缩包损坏等问题，可以 ...\"}, {\"title\": \"Pengfei Cao - HomePage\", \"url\": \"https://cpf-nlpr.github.io/\", \"snippet\": \"2023. 中国科学院特别研究助理资助项目. 2023. President Excellence Award, Chinese Academy of Sciences. 2023. Outstanding doctor graduates of Beijing.\"}, {\"title\": \"datawhalechina/ml-for-security: 网络安全中的人工智能方法 ...\", \"url\": \"https://github.com/datawhalechina/ml-for-security\", \"snippet\": \"本项目基于我在中国科学院大学的学习逐步整理，为大家系统化梳理网络空间安全中各个领域里面机器学习方法的运用。会逐渐更新，与大家一起进步！\"}, {\"title\": \"ucas-course\", \"url\": \"https://github.com/topics/ucas-course?o=asc&s=stars\", \"snippet\": \"中国科学院大学（国科大）移动互联网技术第三章爬虫和nlp部分四次作业. nlp ... 中国科学院大学2019-2020课程（秋季，春季，夏季）. latex python3 ucas cpp11 ...\"}, {\"title\": \"Publications - Bin Lin\", \"url\": \"https://binlin.info/publications.html\", \"snippet\": \"Journal Papers. On the Reruns of GitHub Actions Workflows. Jiangnan Huang, Bin Lin TOSEM 2026 BibTex PDF · Understanding Self-Admitted Technical Debt in ...\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "Let me try searching for the candidate's email on GitHub, and also search for the SHARP paper and D2HScore paper.",
+    "tool_calls": [
+      {
+        "id": "call_00_qQl5TzmTplkaGBGoTIsn7278",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"xiatianze22@mails.ucas.ac.cn\\\" github\"}"
+        }
+      },
+      {
+        "id": "call_01_sfHMqjGBBCCDg88P1uH39131",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"SHARP \\\"Steering hallucination in LVLMs\\\" arxiv\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_qQl5TzmTplkaGBGoTIsn7278",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"xiatianze22@mails.ucas.ac.cn\\\" github\", \"results\": [{\"title\": \"Students - University of Chinese Academy of Sciences\", \"url\": \"https://english.ucas.ac.cn/index.php/students\", \"snippet\": \"Admission. Campus Service. NetworkService · SchoolBus. E-mail. @mails.ucas.ac.cn. Log in. Help with logging in · Campus Card; Notice ...\"}, {\"title\": \"Tianren Ma's Homepage\", \"url\": \"https://martian422.github.io/\", \"snippet\": \"中国，北京，100083. Email: matianren18##mails.ucas.ac.cn. Github: https://github.com/martian422. My Biography. I am a Ph.D. candidate of LAMP at UCAS, advised by ...\"}, {\"title\": \"A screenscraper which watches UCAS Track and emails ...\", \"url\": \"https://github.com/timrogers/ucas\", \"snippet\": \"\"}, {\"title\": \"sun-jiao/UCAS-auto-evaluate: 中国科学院大学自动评教\", \"url\": \"https://github.com/sun-jiao/UCAS-auto-evaluate\", \"snippet\": \"\"}, {\"title\": \"IanSmith123/ucas-wifi: 中国科学院大学wifi登录助手\", \"url\": \"https://github.com/IanSmith123/ucas-wifi\", \"snippet\": \"UCAS 已经从锐捷更换到深澜认证系统，而Github 上已有很多可用的深澜登录程序，故本项目不再维护。 UCAS-WIFI. 命令行登录UCAS wifi 。\"}, {\"title\": \"UCASRS\", \"url\": \"https://github.com/IIE-UCAS-RSGroup\", \"snippet\": \"\"}, {\"title\": \"University of the Chinese Academy of Sciences - Wikipedia\", \"url\": \"https://en.wikipedia.org/wiki/University_of_the_Chinese_Academy_of_Sciences\", \"snippet\": \"\"}, {\"title\": \"UCASfed/ucas: 中国科学院大学照片\", \"url\": \"https://github.com/UCASfed/ucas\", \"snippet\": \"中国科学院大学照片. Contribute to UCASfed/ucas development by creating an account on GitHub.\"}, {\"title\": \"tinggh/Thesis-Template-UCAS\", \"url\": \"https://github.com/tinggh/Thesis-Template-UCAS\", \"snippet\": \"\"}, {\"title\": \"Actions · UCAS-YanYang/UCAS-thesis-proposal-template\", \"url\": \"https://github.com/UCAS-YanYang/UCAS-thesis-proposal-template/actions\", \"snippet\": \"GitHub Actions makes it easy to automate all your software workflows, now with world-class CI/CD. Build, test, and deploy your code right from GitHub. Learn ...\"}]}"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_01_sfHMqjGBBCCDg88P1uH39131",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"SHARP \\\"Steering hallucination in LVLMs\\\" arxiv\", \"results\": [{\"title\": \"SHARP: Steering Hallucination in LVLMs via ...\", \"url\": \"https://aclanthology.org/2025.emnlp-main.725.pdf\", \"snippet\": \"\"}, {\"title\": \"Steering Hallucination in LVLMs via Representation ...\", \"url\": \"https://www.researchgate.net/publication/397424916_SHARP_Steering_Hallucination_in_LVLMs_via_Representation_Engineering\", \"snippet\": \"SHARP: Steering Hallucination in LVLMs via Representation Engineering ... arXiv preprint arXiv:2402.15300. Mme: A comprehensive evaluation benchmark for ...\"}, {\"title\": \"Attention-space Contrastive Guidance for Efficient ...\", \"url\": \"https://arxiv.org/pdf/2601.13707\", \"snippet\": \"SHARP: Steering hallucination in LVLMs via repre- sentation engineering. In Proceedings of the 2025 Confer- ence on Empirical Methods in Natural Language ...\"}, {\"title\": \"LEAD: Layer-wise Expert-aligned Decoding for Faithful ...\", \"url\": \"https://arxiv.org/html/2602.04617v1\", \"snippet\": \"Sharp: Steering hallucination in lvlms via representation engineering. In Proceedings of the 2025 Conference on Empirical Methods in Natural ...\"}, {\"title\": \"ZJU-REAL/EasySteer: A Unified Framework for High- ...\", \"url\": \"https://github.com/ZJU-REAL/EasySteer\", \"snippet\": \"[2025/11/23] SHARP: Steering Hallucination in LVLMs via Representation Engineering (EMNLP2025 Main) Replication Code ... arXiv preprint arXiv:2509.25175}, year={ ...\"}, {\"title\": \"Arbitration Failure, Not Perceptual Blindness: How Vision- ...\", \"url\": \"https://arxiv.org/html/2604.09364v2\", \"snippet\": \"Tan (2025) SHARP: steering hallucination in LVLMs via representation engineering. In Proceedings of the 2025 Conference on Empirical Methods ...\"}, {\"title\": \"Attention-space Contrastive Guidance for Efficient Hallucination ...\", \"url\": \"https://www.researchgate.net/publication/399953010_Attention-space_Contrastive_Guidance_for_Efficient_Hallucination_Mitigation_in_LVLMs?_tp=eyJjb250ZXh0Ijp7InBhZ2UiOiJzY2llbnRpZmljQ29udHJpYnV0aW9ucyIsInByZXZpb3VzUGFnZSI6bnVsbCwic3ViUGFnZSI6bnVsbH19\", \"snippet\": \"SHARP: Steering Hallucination in LVLMs via Representation Engineering. Conference Paper. Jan 2025. Wu Junfei · Yue Ding · Guofan Liu · Tieniu Tan · View.\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "Let me search for the SHARP paper on arXiv and also look for the candidate's GitHub more broadly.",
+    "tool_calls": [
+      {
+        "id": "call_00_10esJOTIkBPx8NrTi55w7752",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"SHARP\\\" \\\"Steering hallucination\\\" \\\"representation engineering\\\" arxiv 2025\"}"
+        }
+      },
+      {
+        "id": "call_01_mSxm8rGGEjdh7dA1W01Q0717",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"site:github.com \\\"夏天泽\\\" OR \\\"xiatianze\\\" UCAS\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_10esJOTIkBPx8NrTi55w7752",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"SHARP\\\" \\\"Steering hallucination\\\" \\\"representation engineering\\\" arxiv 2025\", \"results\": [{\"title\": \"SHARP: Steering Hallucination in LVLMs via ...\", \"url\": \"https://aclanthology.org/2025.emnlp-main.725.pdf\", \"snippet\": \"Motivated by this, we propose Steering HAllucination via RePresentation Engineering (SHARP), a representation-level intervention framework that ...\"}, {\"title\": \"Steering Hallucination in LVLMs via Representation ...\", \"url\": \"https://www.researchgate.net/publication/397424916_SHARP_Steering_Hallucination_in_LVLMs_via_Representation_Engineering\", \"snippet\": \"SHARP: Steering Hallucination in LVLMs via Representation Engineering. January 2025. DOI:10.18653/v1/2025.emnlp-main.725. Conference: Proceedings of the 2025 ...\"}, {\"title\": \"Probing Hidden Representations for Detection of LLM ...\", \"url\": \"https://arxiv.org/html/2605.12890v1\", \"snippet\": \"SHARP: Steering hallucination in LVLMs via representation engineering. In Proceedings of the 2025 Conference on Empirical Methods in Natural ...\"}, {\"title\": \"ZJU-REAL/EasySteer: A Unified Framework for High- ...\", \"url\": \"https://github.com/ZJU-REAL/EasySteer\", \"snippet\": \"[2025/11/23] SHARP: Steering Hallucination in LVLMs via Representation Engineering (EMNLP2025 Main) Replication Code. EasySteer × vLLM v1 Engine Adaptation ...\"}, {\"title\": \"LEAD: Layer-wise Expert-aligned Decoding for Faithful ...\", \"url\": \"https://arxiv.org/html/2602.04617v1\", \"snippet\": \"Sharp: Steering hallucination in lvlms via representation engineering. In Proceedings of the 2025 Conference on Empirical Methods in Natural ...\"}, {\"title\": \"Paper Digest: EMNLP 2025 Papers & Highlights\", \"url\": \"https://www.paperdigest.org/2025/11/emnlp-2025-papers-highlights/\", \"snippet\": \"SHARP: Steering Hallucination in LVLMs Via Representation Engineering ... Arxiv · Astronomics · Best Paper · Biology · Computer Vision · Data ...\"}]}"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_01_mSxm8rGGEjdh7dA1W01Q0717",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"夏天泽\\\" OR \\\"xiatianze\\\" UCAS\", \"results\": [{\"title\": \"中国科学院大学计算机科学与技术专业2026届优秀应届本科 ...\", \"url\": \"https://scce.ucas.ac.cn/index.php/zh-CN/tzgg/3599-2026-2?task=down&fid=Ut%2B8tZK3%2FgS5096ZQmzeNQ%3D%3D\", \"snippet\": \"夏天泽. 99.9. 5. 拟推荐. 计算机科学与技术学院. 计算机科学与技术. 刘爽. 99.7. 6. 拟推荐. 计算机科学与技术学院. 计算机科学与技术. 任昊霖. 99.45. 7. 拟推荐. 计算机 ...\"}, {\"title\": \"中国科学院大学2025年本科生学业奖学金公示名单\", \"url\": \"https://onestop.ucas.edu.cn/Content/Upload/2025/10/2.xlsx\", \"snippet\": \"夏天泽, 发放. 82, 80099, 本科部, 2022, 2022K8009915007, 王萌, 发放. 83, 80099, 本科部, 2022, 2022K8009929007, 李彦辰, 发放. 84, 80099, 本科部, 2022 ...\"}, {\"title\": \"Unifying Planning and Video Generation in a Latent Driving ...\", \"url\": \"https://openaccess.thecvf.com/content/CVPR2026/papers/Xia_DriveLaW_Unifying_Planning_and_Video_Generation_in_a_Latent_Driving_CVPR_2026_paper.pdf\", \"snippet\": \"Xia (xiatianze@hust.edu.cn), Y. Li (liyk@hust.edu.cn) and L. Zhou (zhoulijun16@mails. ucas.edu.cn). † Project lead: H. Sun (AmazingRoad@163.com) ...\"}, {\"title\": \"DriveLaW:Unifying Planning and Video Generation in a ...\", \"url\": \"https://arxiv.org/pdf/2512.23421\", \"snippet\": \"Xia (xiatianze@hust.edu.cn), Y. Li (liyk@hust.edu.cn) and L. Zhou (zhoulijun16@mails. ucas.edu.cn). † Project lead: H. Sun (AmazingRoad@163.com) ...\"}, {\"title\": \"【推免公示】人工智能学院关于接收2026级推荐免试研究生拟 ...\", \"url\": \"https://ai.ucas.ac.cn/index.php/zh-cn/tzgg/7551-2026-6\", \"snippet\": \"\"}, {\"title\": \"公示名单\", \"url\": \"https://onestop.ucas.edu.cn/Content/Upload/2025/11/2.xlsx\", \"snippet\": \"夏天泽, 2022K8009915006, 计算机科学与技术, 2022级, 2. 75, 73, 许晋升, 2022K8009916008, 计算机科学与技术, 2022级, 2. 76, 74, 王淼 ...\"}, {\"title\": \"DriveLaW: Unifying Planning and Video Generation in a ...\", \"url\": \"https://arxiv.org/html/2512.23421v3\", \"snippet\": \"Xia (xiatianze@hust.edu.cn), Y. Li (liyk@hust.edu.cn) and L. Zhou (zhoulijun16@mails.ucas.edu.cn). † Project lead: H. Sun (AmazingRoad ...\"}, {\"title\": \"“中国科学院大学优秀共青团员”名单（共867 个） （按姓氏笔画 ...\", \"url\": \"https://onestop.ucas.edu.cn/Content/Upload/2026/3/5.pdf\", \"snippet\": \"夏天泽. 徐晗. 高宇轩. 高忻扬. 高瑷琪. 黄静怡. 章唐惟. 梁雨杰. 梁斯为. 彭雨辰. 彭雄. 葛笑非. 蒋轶凡. 曾天成. 曾繁泽. 谢瑞. 潘政熹. 纳米能源与系统研究所团委（12 人 ...\"}, {\"title\": \"优秀学生\", \"url\": \"https://onestop.ucas.ac.cn/Content/Upload/2024/5/1.xls\", \"snippet\": \"夏天泽, 80099, 本科部, 三好学生. 4853, 2022K8009915017, 唐睿, 80099, 本科部, 三好学生. 4854, 2022K8009925009, 王敬华, 80099, 本科部, 三好学生. 4855 ...\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "Let me look for the SHARP paper on arXiv and also search for the candidate's GitHub profile more specifically.",
+    "tool_calls": [
+      {
+        "id": "call_00_HN6ZOkzwoNC6ta0ZJkRQ9819",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"SHARP\\\" \\\"Steering hallucination\\\" \\\"EMNLP 2025\\\" arxiv\"}"
+        }
+      },
+      {
+        "id": "call_01_zJSSXlDHwFnTAR3WPjHt5958",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"Tianze Xia\\\" github UCAS\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_HN6ZOkzwoNC6ta0ZJkRQ9819",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"SHARP\\\" \\\"Steering hallucination\\\" \\\"EMNLP 2025\\\" arxiv\", \"results\": [{\"title\": \"Accepted Main Conference Papers\", \"url\": \"https://2025.emnlp.org/program/main_papers/\", \"snippet\": \"EMNLP 2025 Accepted Main Conference Papers. ... SHARP: Steering Hallucination in LVLMs via Representation Engineering Junfei ...\"}, {\"title\": \"The 2025 Conference on Empirical Methods in Natural ...\", \"url\": \"https://aclanthology.org/events/emnlp-2025/\", \"snippet\": \"... SHARP: Steering Hallucination in LVLMs via Representation Engineering · Junfei Wu | Yue Ding | Guofan Liu | Tianze Xia | Ziyue Huang | Dianbo ...\"}, {\"title\": \"Paper Digest: EMNLP 2025 Papers & Highlights\", \"url\": \"https://www.paperdigest.org/2025/11/emnlp-2025-papers-highlights/\", \"snippet\": \"\"}, {\"title\": \"Dianbo Sui\", \"url\": \"https://dblp.org/pid/254/8270\", \"snippet\": \"SHARP: Steering Hallucination in LVLMs via Representation Engineering. EMNLP 2025: 14346-14361 ... electronic edition @ arxiv.org (open access) ...\"}, {\"title\": \"News | Shu Wu\", \"url\": \"http://shuwu.name/publication.html\", \"snippet\": \"... arXiv preprint arXiv:2506.07795}, year={2025} }. SHARP: Steering ... (EMNLP), 2025. [bib]. @inproceedings{wu2025sharp, title={SHARP: Steering Hallucination ...\"}]}"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_01_zJSSXlDHwFnTAR3WPjHt5958",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"Tianze Xia\\\" github UCAS\", \"results\": [{\"title\": \"Awesome-LLM-for-Autonomous-Driving-Resources\", \"url\": \"https://github.com/thinklab-sjtu/awesome-llm4ad\", \"snippet\": \"Tianze Xia, Yongkang Li, Lijun Zhou, Jingfeng Yao, Kaixin Xiong ... Code: UCAS-CSU-phase2; Task: VQA; Datasets: RoboSense Challenge ...\"}, {\"title\": \"Awesome-Context-Engineering/README.md at main\", \"url\": \"https://github.com/Meirtz/Awesome-Context-Engineering/blob/main/README.md\", \"snippet\": \"... ucas.ac.cn. I WROTE THE WRONG EMAIL ADDRESS IN THE FIRST VERSION ... Tianze Xia and Jiafeng Guo and Shenghua Liu}, year={2025}, eprint ...\"}, {\"title\": \"Baolong Bi\", \"url\": \"https://byronbbl.github.io/\", \"snippet\": \"... Tianze Xia, Jiafeng Guo, Shenghua Liu. A Survey of Context Engineering for Large Language Models [arxiv] [paper] [github]. Baolong Bi , Shenghua Liu ...\"}, {\"title\": \"DriveLaW: Unifying Planning and Video Generation in a ...\", \"url\": \"https://arxiv.org/html/2512.23421v3\", \"snippet\": \"\"}, {\"title\": \"葛钰峣的学术主页 | YuyaoGe's Website\", \"url\": \"https://geyuyao.com/\", \"snippet\": \"... Tianze Xia, Jiafeng Guo, Shenghua Liu. Cite PDF arXiv Hugging Face GitHub Ask KIMI · A Survey of Context Engineering for Large Language Models · Innate ...\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "Let me check the SHARP paper on arXiv and also look for the candidate's GitHub.",
+    "tool_calls": [
+      {
+        "id": "call_00_bgx7bYchHYDYYK1WA8ww5902",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"SHARP\\\" \\\"Steering hallucination\\\" \\\"arxiv\\\" \\\"2506\\\"\"}"
+        }
+      },
+      {
+        "id": "call_01_zDDkLujNScC0L02MdZ6F5109",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"Tianze Xia\\\" \\\"SHARP\\\" github code\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_bgx7bYchHYDYYK1WA8ww5902",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"SHARP\\\" \\\"Steering hallucination\\\" \\\"arxiv\\\" \\\"2506\\\"\", \"results\": [{\"title\": \"SHARP: Steering Hallucination in LVLMs via ...\", \"url\": \"https://aclanthology.org/2025.emnlp-main.725.pdf\", \"snippet\": \"Seeing is believing: Mitigating hallucination in large vision- language models via clip-guided decoding. arXiv preprint arXiv:2402.15300.\"}, {\"title\": \"Steering LVLMs via Sparse Autoencoder for Hallucination ...\", \"url\": \"https://arxiv.org/abs/2505.16146\", \"snippet\": \"In this work, we leverage sparse autoencoders (SAEs) to identify semantic directions closely associated with faithfulness or hallucination, ...\"}, {\"title\": \"Steering Hallucination in LVLMs via Representation ...\", \"url\": \"https://www.researchgate.net/publication/397424916_SHARP_Steering_Hallucination_in_LVLMs_via_Representation_Engineering\", \"snippet\": \"... This design aims to mitigate hallucinations and enforce tighter alignment between generated reports and visual evidence, as shown in Figure 1. LEAD is ...\"}, {\"title\": \"[2503.01917] Steer LLM Latents for Hallucination Detection\", \"url\": \"https://arxiv.org/abs/2503.01917\", \"snippet\": \"We propose the Truthfulness Separator Vector (TSV), a lightweight and flexible steering vector that reshapes the LLM's representation space during inference.\"}, {\"title\": \"Reducing Hallucinations in Vision-Language Models via ...\", \"url\": \"https://github.com/shengliu66/vti\", \"snippet\": \"Extensive experiments demonstrate that it can effectively reduce hallucinations and outperform baseline methods across multiple metrics, highlighting the ...\"}, {\"title\": \"ICML Poster Steer LLM Latents for Hallucination Detection\", \"url\": \"https://icml.cc/virtual/2025/poster/45122\", \"snippet\": \"Our method achieves state-of-the-art hallucination detection with few labeled examples and works across different tasks and datasets. TSV is computationally ...\"}, {\"title\": \"Steer LLM Latents for Hallucination Detection - GitHub\", \"url\": \"https://raw.githubusercontent.com/mlresearch/v267/main/assets/park25a/park25a.pdf\", \"snippet\": \"Abstract. Hallucinations in LLMs pose a significant con- cern to their safe deployment in real-world appli- cations. Recent approaches have leveraged the.\"}, {\"title\": \"TOWARDS INTERPRETABLE STEERING FOR ...\", \"url\": \"https://openreview.net/pdf?id=LTJZAkRQAz\", \"snippet\": \"To evaluate how the strength of contrastive neu- ron steering affects hallucination suppression and content preservation, we vary the weight λ of ...\"}, {\"title\": \"Steering Hallucination in LVLMs via Representation ...\", \"url\": \"https://aclanthology.org/2025.emnlp-main.725/\", \"snippet\": \"Our probing results reveal that hallucinations exhibit distinguishable representational patterns, suggesting the potential for a representation-level approach ...\"}]}"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_01_zDDkLujNScC0L02MdZ6F5109",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"Tianze Xia\\\" \\\"SHARP\\\" github code\", \"results\": [{\"title\": \"DriveLaW: Unifying Planning and Video Generation in a ...\", \"url\": \"https://arxiv.org/html/2512.23421v3\", \"snippet\": \"\"}, {\"title\": \"Steering Hallucination in LVLMs via Representation ...\", \"url\": \"https://www.researchgate.net/publication/397424916_SHARP_Steering_Hallucination_in_LVLMs_via_Representation_Engineering\", \"snippet\": \"SHARP: Steering Hallucination in LVLMs via Representation Engineering ... Tianze Xia · Tianze Xia. This person is not on ResearchGate, or hasn ...\"}, {\"title\": \"Junfei Wu\", \"url\": \"https://aclanthology.org/people/junfei-wu/\", \"snippet\": \"Junfei Wu ACL Anthology https://aclanthology.org › people › junfei-wu\"}, {\"title\": \"Accepted Main Conference Papers\", \"url\": \"https://2025.emnlp.org/program/main_papers/\", \"snippet\": \"SHARP: Steering Hallucination in LVLMs via Representation Engineering Junfei Wu, Yue Ding, Guofan Liu, Tianze Xia, Ziyue Huang, Dianbo Sui, Qiang Liu, Shu ...\"}, {\"title\": \"Full Schedule - The Web Conference 2026\", \"url\": \"https://www2026.thewebconf.org/program/full-schedule.html\", \"snippet\": \"Pattern Discovery with Wide-Lens Analysis and Sharp-Focus ValidationLi Liu, Omar Alonso and Giorgio Ballardin ... Tianze Xia; Evasion Under Blockchain ...\"}, {\"title\": \"Agent Systems with Harness Engineering\", \"url\": \"https://openreview.net/pdf/8bb940ad082fed1f1e2c0a132c0c5b4aa4c9d21c.pdf\", \"snippet\": \"... Tianze Xia, Jiafeng Guo, and Shenghua Liu. A ... GitHub repository. [102] ... Swe-sharp-bench: A reproducible benchmark for c# software engineering tasks.\"}, {\"title\": \"Retrieval Augmented Generation (RAG) Architectures\", \"url\": \"https://www.aussieai.com/research/rag\", \"snippet\": \"Nunes, Rafael Padilha, Morris Sharp, Bruno Silva, Swati Sharma ... Tianze Xia, Jiafeng Guo, Shenghua Liu, 21 Jul 2025 (v2), A Survey of ...\"}, {\"title\": \"Tieniu Tan\", \"url\": \"https://aclanthology.org/people/tieniu-tan/unverified/\", \"snippet\": \"Tieniu Tan ACL Anthology https://aclanthology.org › unverified\"}, {\"title\": \"TokenPilot: Cache-Efficient Context Management for LLM ...\", \"url\": \"https://arxiv.org/html/2606.17016v1\", \"snippet\": \"This enhancement is validated by a sharp reduction in cache miss tokens from 5.943M to 1.589M. ... Tianze Xia, Jiafeng Guo, and Shenghua Liu. 2025 ...\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "Let me check the SHARP paper on ACL Anthology and also search for the candidate's GitHub profile.",
+    "tool_calls": [
+      {
+        "id": "call_00_eOo5koZnYoGSnhW1xiXB0901",
+        "type": "function",
+        "function": {
+          "name": "browser_navigate",
+          "arguments": "{\"url\": \"https://aclanthology.org/2025.emnlp-main.725/\"}"
+        }
+      },
+      {
+        "id": "call_01_g9Zj428yurzHmi4oGdDr3207",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"xiatianze\\\" site:github.com \\\"ucas\\\"\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_eOo5koZnYoGSnhW1xiXB0901",
+    "name": "browser_navigate",
+    "content": "[content too large; saved to disk]\npath: C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\.tool_cache\\20260626_181255\\browser_navigate_0001_1782468838.txt\nUse read_file(path) if the full content is needed.\n\n--- preview (600 chars) ---\n{\"success\": true, \"url\": \"https://aclanthology.org/2025.emnlp-main.725/\", \"snapshot\": \"- link \\\"ACL Anthology\\\" [ref=e1, url=https://aclanthology.org/]\\n- link \\\"News (current)\\\" [ref=e2, url=https://aclanthology.org/posts/]\\n- link \\\"FAQ (current)\\\" [ref=e3, url=https://aclanthology.org/faq/]\\n- link \\\"Corrections (current)\\\" [ref=e4, url=https://aclanthology.org/info/corrections/]\\n- link \\\"Submissions (current)\\\" [ref=e5, url=https://aclanthology.org/info/contrib/]\\n- link \\\"GitHub\\\" [ref=e6, url=https://github.com/acl-org/acl-anthology/]\\n- link \\\"SHARP: Steering Hallucination in LVLMs via\n[...]"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_01_g9Zj428yurzHmi4oGdDr3207",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"xiatianze\\\"  \\\"ucas\\\"\", \"results\": [{\"title\": \"Unifying Planning and Video Generation in a Latent Driving ...\", \"url\": \"https://openaccess.thecvf.com/content/CVPR2026/papers/Xia_DriveLaW_Unifying_Planning_and_Video_Generation_in_a_Latent_Driving_CVPR_2026_paper.pdf\", \"snippet\": \"Xia (xiatianze@hust.edu.cn), Y. Li (liyk@hust.edu.cn) and L. Zhou (zhoulijun16@mails. ucas.edu.cn). † Project lead: H. Sun (AmazingRoad@163.com) ...\"}, {\"title\": \"DriveLaW: Unifying Planning and Video Generation in a ...\", \"url\": \"https://arxiv.org/html/2512.23421v3\", \"snippet\": \"Xia (xiatianze@hust.edu.cn), Y. Li (liyk@hust.edu.cn) and L. Zhou (zhoulijun16@mails.ucas.edu.cn). † Project lead: H. Sun (AmazingRoad ...\"}, {\"title\": \"DriveLaW:Unifying Planning and Video Generation in a ...\", \"url\": \"https://arxiv.org/pdf/2512.23421\", \"snippet\": \"Xia (xiatianze@hust.edu.cn), Y. Li (liyk@hust.edu.cn) and L. Zhou (zhoulijun16@mails. ucas.edu.cn). † Project lead: H. Sun (AmazingRoad@163.com) ...\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "Let me check the ACL Anthology page for the SHARP paper to see if there's an arXiv link or code link.",
+    "tool_calls": [
+      {
+        "id": "call_00_TKfr888j2qLWuLgHvyQT2507",
+        "type": "function",
+        "function": {
+          "name": "read_file",
+          "arguments": "{\"path\": \"C:\\\\Users\\\\LX034\\\\Code\\\\Agent-Tutorial\\\\sessions\\\\.tool_cache\\\\20260626_181255\\\\browser_navigate_0001_1782468838.txt\", \"max_chars\": 5000}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_TKfr888j2qLWuLgHvyQT2507",
+    "name": "read_file",
+    "content": "{\"success\": true, \"path\": \"C:\\\\Users\\\\LX034\\\\Code\\\\Agent-Tutorial\\\\sessions\\\\.tool_cache\\\\20260626_181255\\\\browser_navigate_0001_1782468838.txt\", \"content\": \"{\\\"success\\\": true, \\\"url\\\": \\\"https://aclanthology.org/2025.emnlp-main.725/\\\", \\\"snapshot\\\": \\\"- link \\\\\\\"ACL Anthology\\\\\\\" [ref=e1, url=https://aclanthology.org/]\\\\n- link \\\\\\\"News (current)\\\\\\\" [ref=e2, url=https://aclanthology.org/posts/]\\\\n- link \\\\\\\"FAQ (current)\\\\\\\" [ref=e3, url=https://aclanthology.org/faq/]\\\\n- link \\\\\\\"Corrections (current)\\\\\\\" [ref=e4, url=https://aclanthology.org/info/corrections/]\\\\n- link \\\\\\\"Submissions (current)\\\\\\\" [ref=e5, url=https://aclanthology.org/info/contrib/]\\\\n- link \\\\\\\"GitHub\\\\\\\" [ref=e6, url=https://github.com/acl-org/acl-anthology/]\\\\n- link \\\\\\\"SHARP: Steering Hallucination in LVLMs via Representation Engineering\\\\\\\" [ref=e7, url=https://aclanthology.org/2025.emnlp-main.725.pdf]\\\\n- link \\\\\\\"Junfei Wu\\\\\\\" [ref=e8, url=https://aclanthology.org/people/junfei-wu/]\\\\n- link \\\\\\\"Yue Ding\\\\\\\" [ref=e9, url=https://aclanthology.org/people/yue-ding/unverified/]\\\\n- link \\\\\\\"Guofan Liu\\\\\\\" [ref=e10, url=https://aclanthology.org/people/guofan-liu/unverified/]\\\\n- link \\\\\\\"Tianze Xia\\\\\\\" [ref=e11, url=https://aclanthology.org/people/tianze-xia/unverified/]\\\\n- link \\\\\\\"Ziyue Huang\\\\\\\" [ref=e12, url=https://aclanthology.org/people/ziyue-huang/unverified/]\\\\n- link \\\\\\\"Dianbo Sui\\\\\\\" [ref=e13, url=https://aclanthology.org/people/dianbo-sui/]\\\\n- link \\\\\\\"Qiang Liu\\\\\\\" [ref=e14, url=https://aclanthology.org/people/qiang-liu/]\\\\n- link \\\\\\\"Shu Wu\\\\\\\" [ref=e15, url=https://aclanthology.org/people/shu-wu/]\\\\n- link \\\\\\\"Liang Wang\\\\\\\" [ref=e16, url=https://aclanthology.org/people/liang-wang-8647/]\\\\n- link \\\\\\\"Tieniu Tan\\\\\\\" [ref=e17, url=https://aclanthology.org/people/tieniu-tan/]\\\\n- link \\\\\\\"Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing\\\\\\\" [ref=e18, url=https://aclanthology.org/volumes/2025.emnlp-main/]\\\\n- link \\\\\\\"Christos Christodoulopoulos\\\\\\\" [ref=e19, url=https://aclanthology.org/people/christos-christodoulopoulos/]\\\\n- link \\\\\\\"Tanmoy Chakraborty\\\\\\\" [ref=e20, url=https://aclanthology.org/people/tanmoy-chakraborty/]\\\\n- link \\\\\\\"Carolyn Rose\\\\\\\" [ref=e21, url=https://aclanthology.org/people/carolyn-rose/]\\\\n- link \\\\\\\"Violet Peng\\\\\\\" [ref=e22, url=https://aclanthology.org/people/violet-peng/unverified/]\\\\n- link \\\\\\\"EMNLP\\\\\\\" [ref=e23, url=https://aclanthology.org/venues/emnlp/]\\\\n- link \\\\\\\"https://aclanthology.org/2025.emnlp-main.725/\\\\\\\" [ref=e24, url=https://aclanthology.org/2025.emnlp-main.725/]\\\\n- link \\\\\\\"10.18653/v1/2025.emnlp-main.725\\\\\\\" [ref=e25, url=https://doi.org/10.18653/v1/2025.emnlp-main.725]\\\\n- link \\\\\\\"SHARP: Steering Hallucination in LVLMs via Representation Engineering\\\\\\\" [ref=e26, url=https://aclanthology.org/2025.emnlp-main.725/]\\\\n- link \\\\\\\"SHARP: Steering Hallucination in LVLMs via Representation Engineering\\\\\\\" [ref=e27, url=https://aclanthology.org/2025.emnlp-main.725/]\\\\n- link \\\\\\\"https://aclanthology.org/2025.emnlp-main.725.pdf\\\\\\\" [ref=e28, url=https://aclanthology.org/2025.emnlp-main.725.pdf]\\\\n- link \\\\\\\"2025.emnlp-main.725.checklist.pdf\\\\\\\" [ref=e29, url=https://aclanthology.org/attachments/2025.emnlp-main.725.checklist.pdf]\\\\n- link \\\\\\\"PDF\\\\\\\" [ref=e30, url=https://aclanthology.org/2025.emnlp-main.725.pdf]\\\\n- link \\\\\\\"Cite\\\\\\\" [ref=e31, url=https://aclanthology.org/2025.emnlp-main.725/#]\\\\n- link \\\\\\\"Search\\\\\\\" [ref=e32, url=https://www.semanticscholar.org/search?+q=SHARP%3A+Steering+Hallucination+in+LVLMs+via+Representation+Engineering]\\\\n- link \\\\\\\"Checklist\\\\\\\" [ref=e33, url=https://aclanthology.org/attachments/2025.emnlp-main.725.checklist.pdf]\\\\n- link \\\\\\\"Fix data\\\\\\\" [ref=e34, url=https://aclanthology.org/2025.emnlp-main.725/#]\\\\n- link \\\\\\\"http://creativecommons.org/licenses/by/4.0/\\\\\\\" [ref=e35, url=http://creativecommons.org/licenses/by/4.0/]\\\\n- link \\\\\\\"Creative Commons Attribution-NonCommercial-ShareAlike 3.0 International License\\\\\\\" [ref=e36, url=https://creativecommons.org/licenses/by-nc-sa/3.0/]\\\\n- link \\\\\\\"Creative Commons Attribution 4.0 International License\\\\\\\" [ref=e37, url=https://creativecommons.org/licenses/by/4.0/]\\\\n- link \\\\\\\"ACL Anthology team\\\\\\\" [ref=e38, url=https://aclanthology.org/info/credits/]\\\\n- link \\\\\\\"commit 60d2bd9\\\\\\\" [ref=e39, url=https://github.com/acl-org/acl-anthology/tree/60d2bd963906b96bc278ef333e21423aa9fc4f94]\\\\n- searchbox \\\\\\\"Search...\\\\\\\" [ref=e40]\\\\n- button \\\\\\\"Submit search\\\\\\\" [ref=e41]\\\\n- button \\\\\\\"wu-etal-2025-sharp\\\\\\\" [ref=e42]\\\\n- button \\\\\\\"Copy ACL citation to clipboard\\\\\\\" [ref=e43]\\\\n- button \\\\\\\"Copy informal citation to clipboard\\\\\\\" [ref=e44]\\\\n- button \\\\\\\"BibTeX\\\\\\\" [ref=e45]\\\\n- button \\\\\\\"Markdown\\\\\\\" [ref=e46]\\\\n- button \\\\\\\"MODS XML\\\\\\\" [ref=e47]\\\\n- button \\\\\\\"Endnote\\\\\\\" [ref=e48]\\\\n- button \\\\\\\"More options…\\\\\\\" [ref=e49]\\\", \\\"refs\\\": {\\\"e1\\\": {\\\"role\\\": \\\"link\\\", \\\"name\\\": \\\"ACL Anthology\\\", \\\"selector\\\": \\\"html > body > nav.navbar.navbar-expand-md > div.container-xl.col-xl-11 > a.navbar-brand\\\", \\\"x\\\": 119, \\\"y\\\": 24, \\\"url\\\": \\\"https://aclanthology.org/\\\"}, \\\"e2\\\": {\\\"role\\\": \\\"link\\\", \\\"name\\\": \\\"News (current)\\\", \\\"selector\\\": \\\"div.container-xl.col-xl-11 > div.collapse.navbar-collapse > ul.navbar-nav.flex-grow-1 > li.nav-item:nth-of-type(1) > a.nav-link\\\", \\\"x\\\": 267, \\\"y\\\": 24, \\\"url\\\": \\\"https://aclanthology.org/posts/\\\"}, \\\"e3\\\": {\\\"role\\\": \\\"link\\\", \\\"name\\\": \\\"FAQ (current)\\\", \\\"selector\\\": \\\"div.conta\", \"offset\": 0, \"total_chars\": 17039, \"truncated\": true, \"next_offset\": 5000}"
+  },
+  {
+    "role": "assistant",
+    "content": "Good, I can see the ACL Anthology page for SHARP. Let me now search for the candidate's GitHub profile more specifically.",
+    "tool_calls": [
+      {
+        "id": "call_00_aifepIUc7LQegbzDHLB60245",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"Tianze Xia\\\" \\\"xiatianze\\\" github profile\"}"
+        }
+      },
+      {
+        "id": "call_01_WT6eYBBfYfz2nVPnEYIz6133",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"D2HScore\\\" github code\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_aifepIUc7LQegbzDHLB60245",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"Tianze Xia\\\" \\\"xiatianze\\\" github profile\", \"results\": [{\"title\": \"Tian Xia xiatian52673\", \"url\": \"https://github.com/xiatian52673\", \"snippet\": \"Software Engineer | M.S. in Electrical Engineering at Columbia University - xiatian52673.\"}, {\"title\": \"Tianze Zhao tankztz\", \"url\": \"https://github.com/tankztz\", \"snippet\": \"Software Engineer in Singapore. tankztz has 32 repositories available. Follow their code on GitHub.\"}, {\"title\": \"Tian Xia\", \"url\": \"https://www.catalyzex.com/author/Tian%20Xia\", \"snippet\": \"View Tian Xia's papers and open-source code. See more researchers and engineers like Tian Xia.\"}, {\"title\": \"Xu Tianze TURLEing\", \"url\": \"https://github.com/TURLEing\", \"snippet\": \"\"}, {\"title\": \"Xiao Wang\", \"url\": \"https://xiaowangnlp.github.io/\", \"snippet\": \"\"}, {\"title\": \"Steering Hallucination in LVLMs via Representation ...\", \"url\": \"https://aclanthology.org/2025.emnlp-main.725/\", \"snippet\": \"GitHub · SHARP: Steering Hallucination in LVLMs via Representation Engineering · Junfei Wu, Yue Ding, Guofan Liu, Tianze Xia, Ziyue Huang, Dianbo Sui, Qiang Liu ...\"}, {\"title\": \"Tianshi Xu Hitenze\", \"url\": \"https://github.com/hitenze\", \"snippet\": \"\"}, {\"title\": \"Tianze tianzeshi-study\", \"url\": \"https://github.com/tianzeshi-study\", \"snippet\": \"tianzeshi-study has 29 repositories available. Follow their code on GitHub.\"}, {\"title\": \"Tian Xia - Software Engineer at ByteDance\", \"url\": \"https://www.linkedin.com/in/tian-xia-11275576\", \"snippet\": \"Software Engineer at ByteDance · Experience: ByteDance · Education: Columbia University in the City of New York · Location: Greater Seattle Area · 500+ ...\"}]}"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_01_WT6eYBBfYfz2nVPnEYIz6133",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"D2HScore\\\" github code\", \"results\": [{\"title\": \"navi-SAD (Spectral Attention Divergence)\", \"url\": \"https://github.com/Project-Navi/navi-SAD\", \"snippet\": \"D2HScore (Ding et al., 2025): low dispersion and drift in internal representations characterize hallucinated content. EigenTrack (arXiv:2509.15735, 2025): ...\"}, {\"title\": \"How Language Models Process Out-of-Distribution Inputs\", \"url\": \"https://arxiv.org/pdf/2605.00269\", \"snippet\": \"We implement D2HScore and TV-Score under our length-matched protocol; both fall below Maha-Traj (0.721 vs. 0.611 and 0.524). These works ...\"}, {\"title\": \"Routing Distraction in Multimodal Mixture-of-Experts\", \"url\": \"https://arxiv.org/pdf/2604.08541\", \"snippet\": \"2025. D2hscore: Reasoning-aware hallucination detection via semantic breadth and depth analysis in llms. arXiv preprint arXiv:2509.11569.\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "Let me try to find the candidate's GitHub profile by looking at the EasySteer repo which mentions SHARP replication code, and also search for the candidate's name more broadly.",
+    "tool_calls": [
+      {
+        "id": "call_00_8pGcg4pinrnhqBFOdHrG4811",
+        "type": "function",
+        "function": {
+          "name": "browser_navigate",
+          "arguments": "{\"url\": \"https://github.com/ZJU-REAL/EasySteer\"}"
+        }
+      },
+      {
+        "id": "call_01_dlhJBuCIhioERyXker5x2302",
+        "type": "function",
+        "function": {
+          "name": "google_search",
+          "arguments": "{\"query\": \"\\\"Tianze Xia\\\" \\\"中国科学院\\\" github profile page\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_8pGcg4pinrnhqBFOdHrG4811",
+    "name": "browser_navigate",
+    "content": "[content too large; saved to disk]\npath: C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\.tool_cache\\20260626_181255\\browser_navigate_0002_1782468863.txt\nUse read_file(path) if the full content is needed.\n\n--- preview (600 chars) ---\n{\"success\": true, \"url\": \"https://github.com/ZJU-REAL/EasySteer\", \"snapshot\": \"- link \\\"Skip to content\\\" [ref=e1, url=https://github.com/ZJU-REAL/EasySteer#start-of-content]\\n- link \\\"Homepage\\\" [ref=e2, url=https://github.com/]\\n- link \\\"Sign in\\\" [ref=e3, url=https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2FZJU-REAL%2FEasySteer]\\n- link \\\"ZJU-REAL\\\" [ref=e4, url=https://github.com/ZJU-REAL]\\n- link \\\"EasySteer\\\" [ref=e5, url=https://github.com/ZJU-REAL/EasySteer]\\n- link \\\"Notifications\\\" [ref=e6, url=https://github.com/login?return_to=%2FZJU-REAL%2FEasySteer]\\n- link \\\"Fork 23\n[...]"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_01_dlhJBuCIhioERyXker5x2302",
+    "name": "google_search",
+    "content": "{\"success\": true, \"query\": \"\\\"Tianze Xia\\\" \\\"中国科学院\\\" github profile page\", \"results\": [{\"title\": \"Where software is built\", \"url\": \"https://github.com/orgs/epfl-lasa/followers\", \"snippet\": \"Tianyi Xia Skylar-xty. HIT '25 San Diego, United States. Follow · @wantingyao · Wanting Yao wantingyao. MSE in Robotics @ UPenn. University of Pennsylvania ...\"}, {\"title\": \"Tianwen Zhou TianwenZhou\", \"url\": \"https://github.com/TianwenZhou\", \"snippet\": \"\"}, {\"title\": \"安杰-中国科学院大学-UCAS\", \"url\": \"https://people.ucas.edu.cn/~anjie?language=en\", \"snippet\": \"\"}, {\"title\": \"Where software is built\", \"url\": \"https://github.com/orgs/Tencent-Hunyuan/followers\", \"snippet\": \"\"}, {\"title\": \"Tianze Jiang: About me\", \"url\": \"https://petyrrrrr.github.io/\", \"snippet\": \"\"}, {\"title\": \"Names List - Discover gists - GitHub\", \"url\": \"https://gist.github.com/d-oliveros/3693a104a0dc82695324\", \"snippet\": \"Names List. GitHub Gist: instantly share code, notes, and snippets.\"}, {\"title\": \"Tian Xia\", \"url\": \"https://www.catalyzex.com/author/Tian%20Xia\", \"snippet\": \"View Tian Xia's papers and open-source code. See more researchers and engineers like Tian Xia.\"}, {\"title\": \"Sixiang Chen Ephemeral182\", \"url\": \"https://github.com/Ephemeral182\", \"snippet\": \"\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "Let me try to search for the candidate's GitHub by looking at the D2HScore paper's arXiv page, which might have a GitHub link.",
+    "tool_calls": [
+      {
+        "id": "call_00_YLd34kcQQCSeXSJBNrBP4362",
+        "type": "function",
+        "function": {
+          "name": "browser_navigate",
+          "arguments": "{\"url\": \"https://arxiv.org/abs/2509.11569\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_YLd34kcQQCSeXSJBNrBP4362",
+    "name": "browser_navigate",
+    "content": "[content too large; saved to disk]\npath: C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\.tool_cache\\20260626_181255\\browser_navigate_0003_1782468872.txt\nUse read_file(path) if the full content is needed.\n\n--- preview (600 chars) ---\n{\"success\": true, \"url\": \"https://arxiv.org/abs/2509.11569\", \"snapshot\": \"- link \\\"Skip to main content\\\" [ref=e1, url=https://arxiv.org/abs/2509.11569#content]\\n- link \\\"https://www.cornell.edu/\\\" [ref=e2, url=https://www.cornell.edu/]\\n- link \\\"Learn about arXiv becoming an independent nonprofit.\\\" [ref=e3, url=https://tech.cornell.edu/arxiv/]\\n- link \\\"member institutions\\\" [ref=e4, url=https://info.arxiv.org/about/ourmembers.html]\\n- link \\\"Donate\\\" [ref=e5, url=https://info.arxiv.org/about/donate.html]\\n- link \\\"https://arxiv.org/\\\" [ref=e6, url=https://arxiv.org/]\\n- link \\\"cs\\\" [ref=e7,\n[...]"
+  },
+  {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+      {
+        "id": "call_00_KqOQvy7bAe5EtkdXihe74545",
+        "type": "function",
+        "function": {
+          "name": "read_file",
+          "arguments": "{\"path\": \"C:\\\\Users\\\\LX034\\\\Code\\\\Agent-Tutorial\\\\sessions\\\\.tool_cache\\\\20260626_181255\\\\browser_navigate_0003_1782468872.txt\", \"max_chars\": 5000}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_KqOQvy7bAe5EtkdXihe74545",
+    "name": "read_file",
+    "content": "{\"success\": true, \"path\": \"C:\\\\Users\\\\LX034\\\\Code\\\\Agent-Tutorial\\\\sessions\\\\.tool_cache\\\\20260626_181255\\\\browser_navigate_0003_1782468872.txt\", \"content\": \"{\\\"success\\\": true, \\\"url\\\": \\\"https://arxiv.org/abs/2509.11569\\\", \\\"snapshot\\\": \\\"- link \\\\\\\"Skip to main content\\\\\\\" [ref=e1, url=https://arxiv.org/abs/2509.11569#content]\\\\n- link \\\\\\\"https://www.cornell.edu/\\\\\\\" [ref=e2, url=https://www.cornell.edu/]\\\\n- link \\\\\\\"Learn about arXiv becoming an independent nonprofit.\\\\\\\" [ref=e3, url=https://tech.cornell.edu/arxiv/]\\\\n- link \\\\\\\"member institutions\\\\\\\" [ref=e4, url=https://info.arxiv.org/about/ourmembers.html]\\\\n- link \\\\\\\"Donate\\\\\\\" [ref=e5, url=https://info.arxiv.org/about/donate.html]\\\\n- link \\\\\\\"https://arxiv.org/\\\\\\\" [ref=e6, url=https://arxiv.org/]\\\\n- link \\\\\\\"cs\\\\\\\" [ref=e7, url=https://arxiv.org/list/cs/recent]\\\\n- link \\\\\\\"Help\\\\\\\" [ref=e8, url=https://info.arxiv.org/help]\\\\n- link \\\\\\\"Advanced Search\\\\\\\" [ref=e9, url=https://arxiv.org/search/advanced]\\\\n- link \\\\\\\"Yue Ding\\\\\\\" [ref=e10, url=https://arxiv.org/search/cs?searchtype=author&query=Ding,+Y]\\\\n- link \\\\\\\"Xiaofang Zhu\\\\\\\" [ref=e11, url=https://arxiv.org/search/cs?searchtype=author&query=Zhu,+X]\\\\n- link \\\\\\\"Tianze Xia\\\\\\\" [ref=e12, url=https://arxiv.org/search/cs?searchtype=author&query=Xia,+T]\\\\n- link \\\\\\\"Junfei Wu\\\\\\\" [ref=e13, url=https://arxiv.org/search/cs?searchtype=author&query=Wu,+J]\\\\n- link \\\\\\\"Xinlong Chen\\\\\\\" [ref=e14, url=https://arxiv.org/search/cs?searchtype=author&query=Chen,+X]\\\\n- link \\\\\\\"Qiang Liu\\\\\\\" [ref=e15, url=https://arxiv.org/search/cs?searchtype=author&query=Liu,+Q]\\\\n- link \\\\\\\"Liang Wang\\\\\\\" [ref=e16, url=https://arxiv.org/search/cs?searchtype=author&query=Wang,+L]\\\\n- link \\\\\\\"arXiv:2509.11569\\\\\\\" [ref=e17, url=https://arxiv.org/abs/2509.11569]\\\\n- link \\\\\\\"arXiv:2509.11569v1\\\\\\\" [ref=e18, url=https://arxiv.org/abs/2509.11569v1]\\\\n- link \\\\\\\"https://doi.org/10.48550/arXiv.2509.11569\\\\\\\" [ref=e19, url=https://doi.org/10.48550/arXiv.2509.11569]\\\\n- link \\\\\\\"view email\\\\\\\" [ref=e20, url=https://arxiv.org/show-email/e926edb3/2509.11569]\\\\n- link \\\\\\\"View PDF\\\\\\\" [ref=e21, url=https://arxiv.org/pdf/2509.11569]\\\\n- link \\\\\\\"HTML (experimental)\\\\\\\" [ref=e22, url=https://arxiv.org/html/2509.11569v1]\\\\n- link \\\\\\\"TeX Source\\\\\\\" [ref=e23, url=https://arxiv.org/src/2509.11569]\\\\n- link \\\\\\\"view license\\\\\\\" [ref=e24, url=http://arxiv.org/licenses/nonexclusive-distrib/1.0/]\\\\n- link \\\\\\\"< prev\\\\\\\" [ref=e25, url=https://arxiv.org/prevnext?id=2509.11569&function=prev&context=cs.CL]\\\\n- link \\\\\\\"next >\\\\\\\" [ref=e26, url=https://arxiv.org/prevnext?id=2509.11569&function=next&context=cs.CL]\\\\n- link \\\\\\\"new\\\\\\\" [ref=e27, url=https://arxiv.org/list/cs.CL/new]\\\\n- link \\\\\\\"recent\\\\\\\" [ref=e28, url=https://arxiv.org/list/cs.CL/recent]\\\\n- link \\\\\\\"2025-09\\\\\\\" [ref=e29, url=https://arxiv.org/list/cs.CL/2025-09]\\\\n- link \\\\\\\"cs\\\\\\\" [ref=e30, url=https://arxiv.org/abs/2509.11569?context=cs]\\\\n- link \\\\\\\"NASA ADS\\\\\\\" [ref=e31, url=https://ui.adsabs.harvard.edu/abs/arXiv:2509.11569]\\\\n- link \\\\\\\"Google Scholar\\\\\\\" [ref=e32, url=https://scholar.google.com/scholar_lookup?arxiv_id=2509.11569]\\\\n- link \\\\\\\"Semantic Scholar\\\\\\\" [ref=e33, url=https://api.semanticscholar.org/arXiv:2509.11569]\\\\n- link [ref=e34, url=http://www.bibsonomy.org/BibtexHandler?requTask=upload&url=https://arxiv.org/abs/2509.11569&description=D$^2$HScore:%20Reasoning-Aware%20Hallucination%20Detection%20via%20Semantic%20Breadth%20and%20Depth%20Analysis%20in%20LLMs]\\\\n- link \\\\\\\"Bookmark on Reddit\\\\\\\" [ref=e35, url=https://reddit.com/submit?url=https://arxiv.org/abs/2509.11569&title=D$^2$HScore:%20Reasoning-Aware%20Hallucination%20Detection%20via%20Semantic%20Breadth%20and%20Depth%20Analysis%20in%20LLMs]\\\\n- link \\\\\\\"What is the Explorer?\\\\\\\" [ref=e36, url=https://info.arxiv.org/labs/showcase.html#arxiv-bibliographic-explorer]\\\\n- link \\\\\\\"What is Connected Papers?\\\\\\\" [ref=e37, url=https://www.connectedpapers.com/about]\\\\n- link \\\\\\\"What is Litmaps?\\\\\\\" [ref=e38, url=https://www.litmaps.co/]\\\\n- link \\\\\\\"What are Smart Citations?\\\\\\\" [ref=e39, url=https://www.scite.ai/]\\\\n- link \\\\\\\"Which authors of this paper are endorsers?\\\\\\\" [ref=e40, url=https://arxiv.org/auth/show-endorsers/2509.11569]\\\\n- link \\\\\\\"Disable MathJax\\\\\\\" [ref=e41, url=javascript:setMathjaxCookie()]\\\\n- link \\\\\\\"What is MathJax?\\\\\\\" [ref=e42, url=https://info.arxiv.org/help/mathjax.html]\\\\n- link \\\\\\\"About\\\\\\\" [ref=e43, url=https://info.arxiv.org/about]\\\\n- link \\\\\\\"Help\\\\\\\" [ref=e44, url=https://info.arxiv.org/help]\\\\n- link \\\\\\\"Contact\\\\\\\" [ref=e45, url=https://info.arxiv.org/help/contact.html]\\\\n- link \\\\\\\"Subscribe\\\\\\\" [ref=e46, url=https://info.arxiv.org/help/subscribe]\\\\n- link \\\\\\\"Copyright\\\\\\\" [ref=e47, url=https://info.arxiv.org/help/license/index.html]\\\\n- link \\\\\\\"Privacy Policy\\\\\\\" [ref=e48, url=https://info.arxiv.org/help/policies/privacy_policy.html]\\\\n- link \\\\\\\"Web Accessibility Assistance\\\\\\\" [ref=e49, url=https://info.arxiv.org/help/web_accessibility.html]\\\\n- link \\\\\\\"arXiv Operational Status\\\\\\\" [ref=e50, url=https://status.arxiv.org/]\\\\n- textbox \\\\\\\"Search...\\\\\\\" [ref=e51]\\\\n- combobox \\\\\\\"All fields Title Author Abstract Comments Journal reference ACM classification MSC classification Report number arXiv id\\\\\\\" [ref=e52]\\\\n- button \\\\\\\"Search\\\\\\\" [ref=e53]\\\\n- button \\\\\\\"Focus to learn more\\\\\\\" [ref=e54]\\\\n- button \\\\\\\"Export BibTeX Citation\\\\\\\" [ref=e55]\\\\n- radio \\\\\\\"on\\\\\\\" [ref=e56]\\\\n- radio \\\\\\\"on\\\\\", \"offset\": 0, \"total_chars\": 18952, \"truncated\": true, \"next_offset\": 5000}"
+  },
+  {
+    "role": "user",
+    "content": "Maximum iteration budget reached. Do not continue searching or browsing. Finish immediately using the information already gathered. If an output file is needed, write it now, then call respond_to_user."
+  },
+  {
+    "role": "assistant",
+    "content": "Let me check the current profile file first, then update it with the findings.",
+    "tool_calls": [
+      {
+        "id": "call_00_0z4M3yEtHscZpSMws0yg2485",
+        "type": "function",
+        "function": {
+          "name": "read_file",
+          "arguments": "{\"path\": \"C:\\\\Users\\\\LX034\\\\Code\\\\CVScreeningAgent\\\\workspace\\\\candidates\\\\Tianze Xia-6.23-12\\\\stage1_profile.json\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_0z4M3yEtHscZpSMws0yg2485",
+    "name": "read_file",
+    "content": "{\"success\": true, \"path\": \"C:\\\\Users\\\\LX034\\\\Code\\\\CVScreeningAgent\\\\workspace\\\\candidates\\\\Tianze Xia-6.23-12\\\\stage1_profile.json\", \"content\": \"{\\n  \\\"candidate\\\": {\\n    \\\"name\\\": \\\"夏天泽\\\",\\n    \\\"emails\\\": [\\n      \\\"xiatianze22@mails.ucas.ac.cn\\\"\\n    ],\\n    \\\"phones\\\": [\\n      \\\"15262483048\\\"\\n    ],\\n    \\\"locations\\\": [],\\n    \\\"links\\\": []\\n  },\\n  \\\"education\\\": [\\n    {\\n      \\\"degree_level\\\": \\\"bachelor\\\",\\n      \\\"institution\\\": \\\"中国科学院大学\\\",\\n      \\\"major\\\": \\\"计算机科学与技术\\\",\\n      \\\"start_date\\\": \\\"2022年9月\\\",\\n      \\\"end_date\\\": \\\"2026年6月\\\",\\n      \\\"is_current\\\": true,\\n      \\\"gpa\\\": {\\n        \\\"value\\\": 3.91,\\n        \\\"scale\\\": 4.0,\\n        \\\"raw_text\\\": \\\"GPA：3.91/4.00 | 排名：4/87\\\"\\n      },\\n      \\\"scores\\\": [\\n        {\\n          \\\"type\\\": \\\"TOEFL\\\",\\n          \\\"value\\\": \\\"104\\\",\\n          \\\"raw_text\\\": \\\"英语(TOEFL 104)\\\"\\n        }\\n      ],\\n      \\\"honors\\\": []\\n    },\\n    {\\n      \\\"degree_level\\\": \\\"other\\\",\\n      \\\"institution\\\": \\\"加州大学伯克利分校（UC Berkeley）\\\",\\n      \\\"start_date\\\": \\\"2025年1月\\\",\\n      \\\"end_date\\\": \\\"2025年5月\\\",\\n      \\\"is_current\\\": false,\\n      \\\"scores\\\": [],\\n      \\\"honors\\\": [],\\n      \\\"others\\\": {\\n        \\\"type\\\": \\\"访问学生\\\"\\n      }\\n    }\\n  ],\\n  \\\"work_experience\\\": [],\\n  \\\"projects\\\": [\\n    {\\n      \\\"name\\\": \\\"基于扩散模型的层次化视觉记忆系统研究\\\",\\n      \\\"type\\\": \\\"research\\\",\\n      \\\"start_date\\\": \\\"2025年9月\\\",\\n      \\\"end_date\\\": \\\"2026年5月\\\",\\n      \\\"description\\\": \\\"针对现有多模态大模型无法有效处理超长视频流输入的问题，提出基于扩散模型（FLUX）的生成式视觉记忆架构，将视觉信息内化到LoRA参数中，实现海量视觉信息的高密度压缩与可视化重构。设计并实现“清醒-睡眠”双周期记忆架构，将记忆分为工作、情节与长期记忆三层，实现清醒期流式感知提取，睡眠期异步记忆巩固的“学忆一体”范式。设计基于LoRA秩演进的学习机制，使长期记忆的Rank随着学习动态平滑增长。引入LLM-as-Judge多维度惊奇度评分机制，捕获惊奇事件，并训练低秩的LoRA作为情节记忆。在睡眠期利用经验回放将其巩固进长期记忆，有效克服灾难性遗忘。获评优秀毕业论文。完成搭建生成式回忆原型系统，在自建的20+小时的长视频数据集上跑通全链路，将约61GB的视频压缩至约2.1GB的LoRA权重中（约为原来的3.4%），实现语义检索、时序定位以及画面重构。\\\",\\n      \\\"tech_stack\\\": [],\\n      \\\"links\\\": [],\\n      \\\"others\\\": {\\n        \\\"advisor\\\": \\\"山世光\\\",\\n        \\\"institution\\\": \\\"中国科学院计算机技术研究所\\\"\\n      }\\n    },\\n    {\\n      \\\"name\\\": \\\"多模态大模型幻觉缓解方法研究（SHARP）\\\",\\n      \\\"type\\\": \\\"research\\\",\\n      \\\"start_date\\\": \\\"2024年9月\\\",\\n      \\\"end_date\\\": \\\"2025年5月\\\",\\n      \\\"description\\\": \\\"针对视觉语言大模型的幻觉问题，提出并实现一种无需额外训练的轻量化干预方案，在保证模型推理效率的同时降低幻觉率。修改LLaVA-v1.5的推理层代码，计算每层神经元对于幻觉输出的激活概率熵，定位与幻觉高度相关的神经元层；部署了LLaVA-v1.5、Qwen-VL等模型，在其上复现VCD、VTI方法，完成基线实验。方法在LLaVA-v1.5上取得SOTA表现，在CHAIR幻觉评测指标上较VCD降低近50%，较VTI降低近30%。论文已被EMNLP 2025 Main Conference接收。\\\",\\n      \\\"tech_stack\\\": [],\\n      \\\"links\\\": [],\\n      \\\"others\\\": {\\n        \\\"advisor\\\": \\\"刘强\\\",\\n        \\\"institution\\\": \\\"中国科学院自动化研究所\\\"\\n      }\\n    },\\n    {\\n      \\\"name\\\": \\\"大模型幻觉检测方法研究（D2HScore）\\\",\\n      \\\"type\\\": \\\"research\\\",\\n      \\\"start_date\\\": \\\"2025年6月\\\",\\n      \\\"end_date\\\": \\\"2025年9月\\\",\\n      \\\"description\\\": \\\"基于大模型在幻觉与非幻觉输出时的表示差异，设计并验证一种无需训练的轻量化幻觉检测方案。设计对新提出的评价指标的不同归一化融合，并对融合系数进行消融实验，得到最终的评价指标；主导基线实验的设计和实施，并在LLaMA2、LLaMA3.1、Qwen1.5等模型上完成基线实验；在GSM8K、TheoremQA、MMLU、Belebele及MGSM等5个跨任务数据集上进行主实验，并负责部分论文撰写。实验结果显示，D2HScore在部分模型和数据集上显著超过了基线方法。在TheoremQA任务中，将LLaMA2-7B的AUPR指标从12.77提升至19.73。\\\",\\n      \\\"tech_stack\\\": [],\\n      \\\"links\\\": [],\\n      \\\"others\\\": {\\n        \\\"advisor\\\": \\\"刘强\\\",\\n        \\\"institution\\\": \\\"中国科学院自动化研究所\\\"\\n      }\\n    }\\n  ],\\n  \\\"publications\\\": [\\n    {\\n      \\\"title\\\": \\\"SHARP: Steering hallucination in LVLMs via representation engineering\\\",\\n      \\\"venue\\\": \\\"Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing\\\",\\n      \\\"year\\\": \\\"2025\\\",\\n      \\\"link\\\": \\\"\\\",\\n      \\\"others\\\": {\\n        \\\"authors\\\": \\\"Wu, J., Ding, Y., Liu, G., Xia, T., Huang, Z., Sui, D., Liu, Q., Wu, S., Wang, L., & Tan, T.\\\"\\n      }\\n    },\\n    {\\n      \\\"title\\\": \\\"D²HScore: Reasoning-aware hallucination detection via semantic breadth and depth analysis in LLMs\\\",\\n      \\\"venue\\\": \\\"arXiv preprint arXiv:2509.11569\\\",\\n      \\\"year\\\": \\\"2025\\\",\\n      \\\"link\\\": \\\"https://arxiv.org/abs/2509.11569\\\",\\n      \\\"others\\\": {\\n        \\\"authors\\\": \\\"Ding, Y.*, Zhu, X.*, Xia, T.*, Wu, J., Chen, X., Liu, Q., & Wang, L.\\\"\\n      }\\n    }\\n  ],\\n  \\\"awards\\\": [\\n    \\\"优秀毕业论文\\\"\\n  ],\\n  \\\"skills\\\": {\\n    \\\"programming_languages\\\": [\\n      \\\"Python\\\",\\n      \\\"C\\\",\\n      \\\"C++\\\",\\n      \\\"Verilog\\\"\\n    ],\\n    \\\"frameworks\\\": [\\n      \\\"PyTorch\\\",\\n      \\\"TensorFlow\\\",\\n      \\\"Hugging Face\\\"\\n    ],\\n    \\\"tools\\\": [\\n      \\\"Git\\\",\\n      \\\"GitHub\\\"\\n    ],\\n    \\\"domains\\\": []\\n  }\\n}\", \"offset\": 0, \"total_chars\": 3838, \"truncated\": false, \"next_offset\": null}"
+  },
+  {
+    "role": "user",
+    "content": "Maximum iteration budget reached. Do not continue searching or browsing. Finish immediately using the information already gathered. If an output file is needed, write it now, then call respond_to_user."
+  },
+  {
+    "role": "assistant",
+    "content": "Based on my research, here's what I found:\n\n**GitHub search results:**\n- No personal GitHub profile found for \"夏天泽\" / \"Tianze Xia\" / \"xiatianze\" — extensive searches across Google and GitHub did not locate a personal GitHub account.\n- The SHARP paper (EMNLP 2025) has no public GitHub code repository linked from the ACL Anthology page.\n- The D2HScore paper (arXiv:2509.11569) has no GitHub link on its arXiv page.\n- The EasySteer framework (github.com/ZJU-REAL/EasySteer) mentions SHARP replication code, but this is a third-party repo, not the candidate's.\n- The DriveLaW paper (CVPR 2026) has code at github.com/xiaomi-research/drivelaw — but this is a Xiaomi research repo, and the candidate's email there is xiatianze@hust.edu.cn (different from the UCAS email), suggesting this might be a different person with the same name.\n\n**Publication links found:**\n- SHARP paper: https://aclanthology.org/2025.emnlp-main.725/ (confirmed EMNLP 2025 Main Conference)\n- D2HScore paper: https://arxiv.org/abs/2509.11569 (confirmed)\n\nNow let me update the profile JSON with the verified links and add the SHARP paper's ACL link.",
+    "tool_calls": [
+      {
+        "id": "call_00_bbnjWPd75GmTy3WWutw91604",
+        "type": "function",
+        "function": {
+          "name": "write_file",
+          "arguments": "{\"path\": \"C:\\\\Users\\\\LX034\\\\Code\\\\CVScreeningAgent\\\\workspace\\\\candidates\\\\Tianze Xia-6.23-12\\\\stage1_profile.json\", \"content\": \"{\\n  \\\"candidate\\\": {\\n    \\\"name\\\": \\\"夏天泽\\\",\\n    \\\"emails\\\": [\\n      \\\"xiatianze22@mails.ucas.ac.cn\\\"\\n    ],\\n    \\\"phones\\\": [\\n      \\\"15262483048\\\"\\n    ],\\n    \\\"locations\\\": [],\\n    \\\"links\\\": []\\n  },\\n  \\\"education\\\": [\\n    {\\n      \\\"degree_level\\\": \\\"bachelor\\\",\\n      \\\"institution\\\": \\\"中国科学院大学\\\",\\n      \\\"major\\\": \\\"计算机科学与技术\\\",\\n      \\\"start_date\\\": \\\"2022年9月\\\",\\n      \\\"end_date\\\": \\\"2026年6月\\\",\\n      \\\"is_current\\\": true,\\n      \\\"gpa\\\": {\\n        \\\"value\\\": 3.91,\\n        \\\"scale\\\": 4.0,\\n        \\\"raw_text\\\": \\\"GPA：3.91/4.00 | 排名：4/87\\\"\\n      },\\n      \\\"scores\\\": [\\n        {\\n          \\\"type\\\": \\\"TOEFL\\\",\\n          \\\"value\\\": \\\"104\\\",\\n          \\\"raw_text\\\": \\\"英语(TOEFL 104)\\\"\\n        }\\n      ],\\n      \\\"honors\\\": []\\n    },\\n    {\\n      \\\"degree_level\\\": \\\"other\\\",\\n      \\\"institution\\\": \\\"加州大学伯克利分校（UC Berkeley）\\\",\\n      \\\"start_date\\\": \\\"2025年1月\\\",\\n      \\\"end_date\\\": \\\"2025年5月\\\",\\n      \\\"is_current\\\": false,\\n      \\\"scores\\\": [],\\n      \\\"honors\\\": [],\\n      \\\"others\\\": {\\n        \\\"type\\\": \\\"访问学生\\\"\\n      }\\n    }\\n  ],\\n  \\\"work_experience\\\": [],\\n  \\\"projects\\\": [\\n    {\\n      \\\"name\\\": \\\"基于扩散模型的层次化视觉记忆系统研究\\\",\\n      \\\"type\\\": \\\"research\\\",\\n      \\\"start_date\\\": \\\"2025年9月\\\",\\n      \\\"end_date\\\": \\\"2026年5月\\\",\\n      \\\"description\\\": \\\"针对现有多模态大模型无法有效处理超长视频流输入的问题，提出基于扩散模型（FLUX）的生成式视觉记忆架构，将视觉信息内化到LoRA参数中，实现海量视觉信息的高密度压缩与可视化重构。设计并实现\\\"清醒-睡眠\\\"双周期记忆架构，将记忆分为工作、情节与长期记忆三层，实现清醒期流式感知提取，睡眠期异步记忆巩固的\\\"学忆一体\\\"范式。设计基于LoRA秩演进的学习机制，使长期记忆的Rank随着学习动态平滑增长。引入LLM-as-Judge多维度惊奇度评分机制，捕获惊奇事件，并训练低秩的LoRA作为情节记忆。在睡眠期利用经验回放将其巩固进长期记忆，有效克服灾难性遗忘。获评优秀毕业论文。完成搭建生成式回忆原型系统，在自建的20+小时的长视频数据集上跑通全链路，将约61GB的视频压缩至约2.1GB的LoRA权重中（约为原来的3.4%），实现语义检索、时序定位以及画面重构。\\\",\\n      \\\"tech_stack\\\": [],\\n      \\\"links\\\": [],\\n      \\\"others\\\": {\\n        \\\"advisor\\\": \\\"山世光\\\",\\n        \\\"institution\\\": \\\"中国科学院计算机技术研究所\\\"\\n      }\\n    },\\n    {\\n      \\\"name\\\": \\\"多模态大模型幻觉缓解方法研究（SHARP）\\\",\\n      \\\"type\\\": \\\"research\\\",\\n      \\\"start_date\\\": \\\"2024年9月\\\",\\n      \\\"end_date\\\": \\\"2025年5月\\\",\\n      \\\"description\\\": \\\"针对视觉语言大模型的幻觉问题，提出并实现一种无需额外训练的轻量化干预方案，在保证模型推理效率的同时降低幻觉率。修改LLaVA-v1.5的推理层代码，计算每层神经元对于幻觉输出的激活概率熵，定位与幻觉高度相关的神经元层；部署了LLaVA-v1.5、Qwen-VL等模型，在其上复现VCD、VTI方法，完成基线实验。方法在LLaVA-v1.5上取得SOTA表现，在CHAIR幻觉评测指标上较VCD降低近50%，较VTI降低近30%。论文已被EMNLP 2025 Main Conference接收。\\\",\\n      \\\"tech_stack\\\": [],\\n      \\\"links\\\": [],\\n      \\\"others\\\": {\\n        \\\"advisor\\\": \\\"刘强\\\",\\n        \\\"institution\\\": \\\"中国科学院自动化研究所\\\"\\n      }\\n    },\\n    {\\n      \\\"name\\\": \\\"大模型幻觉检测方法研究（D2HScore）\\\",\\n      \\\"type\\\": \\\"research\\\",\\n      \\\"start_date\\\": \\\"2025年6月\\\",\\n      \\\"end_date\\\": \\\"2025年9月\\\",\\n      \\\"description\\\": \\\"基于大模型在幻觉与非幻觉输出时的表示差异，设计并验证一种无需训练的轻量化幻觉检测方案。设计对新提出的评价指标的不同归一化融合，并对融合系数进行消融实验，得到最终的评价指标；主导基线实验的设计和实施，并在LLaMA2、LLaMA3.1、Qwen1.5等模型上完成基线实验；在GSM8K、TheoremQA、MMLU、Belebele及MGSM等5个跨任务数据集上进行主实验，并负责部分论文撰写。实验结果显示，D2HScore在部分模型和数据集上显著超过了基线方法。在TheoremQA任务中，将LLaMA2-7B的AUPR指标从12.77提升至19.73。\\\",\\n      \\\"tech_stack\\\": [],\\n      \\\"links\\\": [],\\n      \\\"others\\\": {\\n        \\\"advisor\\\": \\\"刘强\\\",\\n        \\\"institution\\\": \\\"中国科学院自动化研究所\\\"\\n      }\\n    }\\n  ],\\n  \\\"publications\\\": [\\n    {\\n      \\\"title\\\": \\\"SHARP: Steering hallucination in LVLMs via representation engineering\\\",\\n      \\\"venue\\\": \\\"Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing\\\",\\n      \\\"year\\\": \\\"2025\\\",\\n      \\\"link\\\": \\\"https://aclanthology.org/2025.emnlp-main.725/\\\",\\n      \\\"others\\\": {\\n        \\\"authors\\\": \\\"Wu, J., Ding, Y., Liu, G., Xia, T., Huang, Z., Sui, D., Liu, Q., Wu, S., Wang, L., & Tan, T.\\\",\\n        \\\"doi\\\": \\\"10.18653/v1/2025.emnlp-main.725\\\"\\n      }\\n    },\\n    {\\n      \\\"title\\\": \\\"D²HScore: Reasoning-aware hallucination detection via semantic breadth and depth analysis in LLMs\\\",\\n      \\\"venue\\\": \\\"arXiv preprint arXiv:2509.11569\\\",\\n      \\\"year\\\": \\\"2025\\\",\\n      \\\"link\\\": \\\"https://arxiv.org/abs/2509.11569\\\",\\n      \\\"others\\\": {\\n        \\\"authors\\\": \\\"Ding, Y.*, Zhu, X.*, Xia, T.*, Wu, J., Chen, X., Liu, Q., & Wang, L.\\\"\\n      }\\n    }\\n  ],\\n  \\\"awards\\\": [\\n    \\\"优秀毕业论文\\\"\\n  ],\\n  \\\"skills\\\": {\\n    \\\"programming_languages\\\": [\\n      \\\"Python\\\",\\n      \\\"C\\\",\\n      \\\"C++\\\",\\n      \\\"Verilog\\\"\\n    ],\\n    \\\"frameworks\\\": [\\n      \\\"PyTorch\\\",\\n      \\\"TensorFlow\\\",\\n      \\\"Hugging Face\\\"\\n    ],\\n    \\\"tools\\\": [\\n      \\\"Git\\\",\\n      \\\"GitHub\\\"\\n    ],\\n    \\\"domains\\\": []\\n  }\\n}\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_00_bbnjWPd75GmTy3WWutw91604",
+    "name": "write_file",
+    "content": "{\"success\": true, \"path\": \"C:\\\\Users\\\\LX034\\\\Code\\\\CVScreeningAgent\\\\workspace\\\\candidates\\\\Tianze Xia-6.23-12\\\\stage1_profile.json\", \"bytes\": 5566}"
+  },
+  {
+    "role": "assistant",
+    "content": "{\"success\": true, \"path\": \"C:\\\\Users\\\\LX034\\\\Code\\\\CVScreeningAgent\\\\workspace\\\\candidates\\\\Tianze Xia-6.23-12\\\\stage1_profile.json\", \"bytes\": 5566}"
+  }
+]

@@ -1,0 +1,2 @@
+
+[kanban] Board 'idea-a-deep-research' complete ¡ª done=6, error=0. Resume your agent to review.
