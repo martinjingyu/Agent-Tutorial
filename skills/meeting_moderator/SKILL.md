@@ -14,7 +14,7 @@ Follow these steps in order:
 
 ### 1. Create participants
 Call `meeting_create_participants` with the list of participants defined in your task prompt.
-Each participant needs a name, role, and optionally skills and a model.
+Each participant needs a name, role, and optionally skills and a model. See `references/model-configuration.md` for guidance on when and how to specify models.
 
 ### 2. Set the agenda (optional but recommended)
 Call `meeting_set_agenda` with a clear statement of what the meeting should resolve.

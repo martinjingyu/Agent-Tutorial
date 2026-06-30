@@ -45,6 +45,15 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _slugify(text: str, max_len: int = 40) -> str:
+    import re
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_]+", "-", text)
+    text = text.strip("-")
+    return text[:max_len].rstrip("-")
+
+
 def _meeting_path(meeting_id: str) -> Path:
     MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
     return MEETINGS_DIR / f"{meeting_id}.json"
@@ -129,8 +138,12 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
         return json_result(success=False, error="participants list is required")
 
     meeting_id = f"mtg_{uuid.uuid4().hex[:10]}"
+    participant_names = [str(cfg.get("name") or "").strip() for cfg in participants_cfg if cfg.get("name")]
+    default_name = "+".join(participant_names[:3])
+
     data: dict[str, Any] = {
         "meeting_id": meeting_id,
+        "name": default_name,
         "created_at": _now(),
         "agenda": "",
         "notes": "",
@@ -171,7 +184,10 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
 
 def _handle_set_agenda(args: dict, runtime: dict) -> str:
     data = _load_meeting(_meeting_id(runtime))
-    data["agenda"] = str(args.get("agenda") or "").strip()
+    agenda = str(args.get("agenda") or "").strip()
+    data["agenda"] = agenda
+    if agenda:
+        data["name"] = _slugify(agenda)
     _save_meeting(data)
     return json_result(success=True)
 

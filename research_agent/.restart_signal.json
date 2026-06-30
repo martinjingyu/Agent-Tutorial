@@ -1,0 +1,9 @@
+{
+  "changes": [
+    "修复 skill_manage 的 name 校验正则：VALID_NAME_RE 增加斜杠 / 支持，使 hr-recruitment/oa-generation 这类带 category 前缀的 skill name 能通过校验"
+  ],
+  "session_id": "20260630_101813",
+  "resume_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\20260630_101813.json",
+  "next_prompt": null,
+  "timestamp": "2026-06-30T11:06:11"
+}

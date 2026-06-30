@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Dashboard</title>
+<style>
+:root {
+  --bg:      #0d1117;
+  --bg2:     #161b22;
+  --bg3:     #21262d;
+  --border:  #30363d;
+  --text:    #e6edf3;
+  --muted:   #8b949e;
+  --cyan:    #79c0ff;
+  --green:   #56d364;
+  --yellow:  #e3b341;
+  --red:     #f85149;
+  --purple:  #bc8cff;
+  --orange:  #ffa657;
+  --radius:  6px;
+  --mono:    'SF Mono','Fira Code','Consolas',monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  font-size: 14px; height: 100vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* ── Topbar ─────────────────────────────────────────────────── */
+#topbar {
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  padding: 0 16px; height: 46px;
+  display: flex; align-items: center; gap: 14px; flex-shrink: 0;
+}
+#topbar h1 { font-size: 14px; font-weight: 700; color: var(--cyan); white-space: nowrap; }
+.stat-pill {
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 20px; padding: 2px 10px; font-size: 12px; color: var(--muted); white-space: nowrap;
+}
+.stat-pill span { color: var(--text); font-weight: 600; }
+#live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; margin-left: auto; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+#live-time { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+
+/* ── Layout ─────────────────────────────────────────────────── */
+#layout { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+#sidebar {
+  width: 196px; background: var(--bg2); border-right: 1px solid var(--border);
+  flex-shrink: 0; display: flex; flex-direction: column; overflow-y: auto;
+}
+.nav-section { padding: 12px 8px 4px; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.nav-item {
+  padding: 6px 10px; border-radius: var(--radius); margin: 1px 5px;
+  cursor: pointer; font-size: 13px; color: var(--muted);
+  display: flex; align-items: center; gap: 7px;
+  transition: background .1s, color .1s;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nav-item:hover { background: var(--bg3); color: var(--text); }
+.nav-item.active { background: var(--bg3); color: var(--cyan); font-weight: 600; }
+.nav-item .badge { margin-left: auto; background: var(--green); color: #000; border-radius: 10px; padding: 0 5px; font-size: 10px; font-weight: 700; }
+.nav-icon { width: 14px; text-align: center; flex-shrink: 0; font-size: 12px; }
+
+/* ── Main ───────────────────────────────────────────────────── */
+#main { flex: 1; overflow-y: auto; padding: 18px 20px; }
+
+/* ── Cards ──────────────────────────────────────────────────── */
+.panel { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; }
+.panel-header {
+  padding: 9px 13px; border-bottom: 1px solid var(--border);
+  font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px;
+}
+.panel-body { padding: 13px; }
+
+/* ── Overview ────────────────────────────────────────────────── */
+.overview-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 14px; }
+.stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+.stat-card .label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+.stat-card .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.c-cyan{color:var(--cyan)} .c-green{color:var(--green)} .c-yellow{color:var(--yellow)} .c-purple{color:var(--purple)}
+
+/* ── Kanban ──────────────────────────────────────────────────── */
+.kanban-columns { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; min-height: 100px; }
+.kanban-col { background: var(--bg3); border-radius: var(--radius); padding: 8px; }
+.kanban-col-header { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; padding-bottom: 5px; border-bottom: 2px solid; }
+.col-ready   .kanban-col-header { color: var(--muted);  border-color: var(--muted); }
+.col-running .kanban-col-header { color: var(--cyan);   border-color: var(--cyan); }
+.col-done    .kanban-col-header { color: var(--green);  border-color: var(--green); }
+.col-error   .kanban-col-header { color: var(--red);    border-color: var(--red); }
+
+.task-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 7px 9px; margin-bottom: 5px; cursor: pointer; transition: border-color .1s; font-size: 12px; }
+.task-card:hover { border-color: var(--cyan); }
+.task-card .task-title { font-weight: 600; color: var(--text); margin-bottom: 3px; line-height: 1.3; }
+.task-card .task-id    { color: var(--muted); font-family: var(--mono); font-size: 10px; }
+.task-card .task-timer { color: var(--yellow); font-family: var(--mono); font-size: 10px; margin-top: 3px; }
+.task-card .task-skill { color: var(--purple); font-size: 10px; margin-top: 2px; }
+.task-output { display: none; margin-top: 7px; padding: 7px; background: var(--bg); border-radius: 3px; font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+.task-card.expanded .task-output { display: block; }
+
+/* ── Meeting ─────────────────────────────────────────────────── */
+.meeting-status { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; flex-shrink: 0; }
+.meeting-status.open   { background: #56d36422; color: var(--green); }
+.meeting-status.closed { background: #8b949e22; color: var(--muted); }
+.participants-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(210px,1fr)); gap: 8px; margin-bottom: 10px; }
+.participant-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px; }
+.participant-card.spoke { border-color: var(--green); }
+.participant-card.spoke .p-name::before { content: "✓ "; color: var(--green); }
+.p-name { font-weight: 600; font-size: 13px; margin-bottom: 1px; }
+.p-role { color: var(--purple); font-size: 10px; margin-bottom: 6px; }
+.p-response { font-size: 12px; color: var(--muted); line-height: 1.5; max-height: 100px; overflow-y: auto; white-space: pre-wrap; }
+.transcript-entry { display: flex; gap: 8px; margin-bottom: 8px; padding: 7px 9px; background: var(--bg3); border-radius: 4px; font-size: 12px; }
+.t-speaker { color: var(--cyan); font-weight: 600; white-space: nowrap; font-family: var(--mono); min-width: 80px; }
+.transcript-entry.moderator .t-speaker { color: var(--orange); }
+.t-content { color: var(--text); line-height: 1.5; white-space: pre-wrap; }
+.conclusion-box { background: #56d36411; border: 1px solid #56d36444; border-radius: var(--radius); padding: 10px; margin-top: 10px; font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
+.conclusion-box::before { content: "Conclusion"; display: block; color: var(--green); font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 5px; }
+.notes-box { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px; font-size: 12px; color: var(--muted); white-space: pre-wrap; line-height: 1.5; margin-top: 8px; }
+.notes-box::before { content: "Notes"; display: block; color: var(--orange); font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+
+/* ── Session messages ────────────────────────────────────────── */
+.message-list { display: flex; flex-direction: column; gap: 8px; }
+.msg { border-radius: var(--radius); padding: 9px 11px; font-size: 13px; line-height: 1.6; }
+.msg.user      { background: var(--bg3); border-left: 3px solid var(--cyan); }
+.msg.assistant { background: var(--bg2); border: 1px solid var(--border); border-left: 3px solid var(--purple); }
+.msg.tool      { background: var(--bg3); border-left: 3px solid var(--green); }
+.msg-role { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 5px; }
+.msg.user      .msg-role { color: var(--cyan); }
+.msg.assistant .msg-role { color: var(--purple); }
+.msg.tool      .msg-role { color: var(--green); }
+.msg-content { white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.msg-content.collapsed, .tool-call-args.collapsed { max-height: 8em; overflow: hidden; }
+.tool-call { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 7px 9px; margin-top: 6px; }
+.tool-call-name { color: var(--orange); font-weight: 600; font-family: var(--mono); font-size: 12px; }
+.tool-call-args { color: var(--muted); margin-top: 4px; white-space: pre-wrap; font-family: var(--mono); font-size: 11px; }
+.expand-btn { background: none; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); font-size: 10px; padding: 1px 7px; cursor: pointer; margin-top: 3px; }
+.expand-btn:hover { color: var(--text); border-color: var(--cyan); }
+
+/* ── Chat view ───────────────────────────────────────────────── */
+#chat-area { display: flex; flex-direction: column; height: 100%; gap: 0; }
+#chat-messages {
+  flex: 1; overflow-y: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+#chat-input-bar {
+  border-top: 1px solid var(--border); background: var(--bg2);
+  padding: 10px 14px; display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0;
+}
+#chat-input {
+  flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); font-size: 13px; padding: 8px 10px; resize: none; outline: none;
+  font-family: inherit; line-height: 1.5; min-height: 38px; max-height: 160px;
+}
+#chat-input:focus { border-color: var(--cyan); }
+#chat-send {
+  background: var(--cyan); color: #000; border: none; border-radius: var(--radius);
+  padding: 8px 14px; font-weight: 700; font-size: 13px; cursor: pointer; flex-shrink: 0; height: 38px;
+}
+#chat-send:hover { background: #a8d8ff; }
+#chat-send:disabled { opacity: .4; cursor: not-allowed; }
+.chat-msg { max-width: 84%; font-size: 13px; line-height: 1.6; }
+.chat-msg.user-msg { align-self: flex-end; background: var(--cyan); color: #000; padding: 8px 12px; border-radius: 10px 10px 2px 10px; }
+.chat-msg.bot-msg  { align-self: flex-start; background: var(--bg2); border: 1px solid var(--border); padding: 8px 12px; border-radius: 2px 10px 10px 10px; white-space: pre-wrap; }
+.chat-msg.sys-msg  { align-self: center; font-size: 11px; color: var(--muted); font-family: var(--mono); background: var(--bg3); padding: 3px 10px; border-radius: 10px; }
+.spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--border); border-top-color: var(--cyan); border-radius: 50%; animation: spin .6s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Stream log (live tool call feed) ───────────────────────── */
+.stream-log {
+  align-self: stretch; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px 8px; font-family: var(--mono); font-size: 12px;
+}
+.stream-iter {
+  color: var(--muted); font-size: 10px; padding: 3px 4px 3px 2px;
+  display: flex; align-items: center; gap: 5px; border-bottom: 1px solid var(--border); margin-bottom: 2px; margin-top: 4px;
+}
+.stream-iter:first-child { margin-top: 0; }
+.stream-iter-num { color: var(--cyan); font-weight: 700; }
+.stream-tool { border-radius: 3px; }
+.stream-tool-row {
+  display: flex; align-items: center; gap: 6px; padding: 3px 4px;
+  cursor: pointer; border-radius: 3px; user-select: none;
+}
+.stream-tool-row:hover { background: var(--bg2); }
+.stream-tool-icon { width: 14px; text-align: center; flex-shrink: 0; line-height: 1; }
+.stream-tool-name { color: var(--orange); font-weight: 600; flex: 1; font-size: 12px; }
+.stream-tool.done  .stream-tool-name { color: var(--text); font-weight: 400; }
+.stream-tool.error .stream-tool-name { color: var(--red); }
+.stream-tool-elapsed { color: var(--muted); font-size: 10px; min-width: 36px; text-align: right; }
+.stream-tool-chevron { color: var(--muted); font-size: 10px; width: 10px; }
+.stream-tool-args {
+  display: none; margin: 1px 4px 4px 20px; padding: 5px 8px;
+  background: var(--bg); border-radius: 3px; color: var(--muted);
+  white-space: pre-wrap; font-size: 11px; max-height: 240px; overflow-y: auto;
+  border-left: 2px solid var(--border);
+}
+.stream-tool-args.open { display: block; }
+.stream-sys { color: var(--muted); font-size: 10px; padding: 3px 4px; font-style: italic; }
+
+/* ── Session header bar ──────────────────────────────────────── */
+.chat-header { padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--bg2); display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.chat-header .sid { font-family: var(--mono); color: var(--cyan); font-size: 11px; }
+
+/* ── Costs ───────────────────────────────────────────────────── */
+.cost-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: var(--mono); }
+.cost-table th { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.cost-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
+.cost-table tr:hover td { background: var(--bg3); }
+.cost-table .num { text-align: right; color: var(--cyan); }
+.cost-table .cost-val { color: var(--yellow); }
+
+/* ── Misc ────────────────────────────────────────────────────── */
+.section-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
+.empty-state { text-align: center; padding: 36px; color: var(--muted); font-size: 13px; }
+.loading { color: var(--muted); padding: 20px; text-align: center; }
+.tag { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; }
+.tag.running{ background:#79c0ff22; color:var(--cyan)  }
+.tag.done   { background:#56d36422; color:var(--green) }
+.tag.error  { background:#f8514922; color:var(--red)   }
+.tag.ready  { background:#8b949e22; color:var(--muted) }
+.tag.blocked{ background:#e3b34122; color:var(--yellow)}
+
+.back-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: var(--radius); padding: 4px 10px; cursor: pointer; font-size: 12px; margin-bottom: 12px; display: inline-flex; align-items: center; gap: 5px; }
+.back-btn:hover { color: var(--text); border-color: var(--cyan); }
+
+.session-row { display: flex; align-items: center; padding: 7px 11px; border-bottom: 1px solid var(--border); cursor: pointer; gap: 10px; transition: background .1s; }
+.session-row:hover { background: var(--bg3); }
+.s-id    { font-family: var(--mono); font-size: 11px; color: var(--cyan); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s-model { color: var(--purple); font-size: 11px; min-width: 110px; }
+.s-msgs  { color: var(--muted);  font-size: 11px; min-width: 55px; text-align: right; }
+.s-cost  { color: var(--yellow); font-family: var(--mono); font-size: 11px; min-width: 72px; text-align: right; }
+.s-date  { color: var(--muted);  font-size: 10px; min-width: 120px; text-align: right; }
+
+/* ── Delete button ───────────────────────────────────────────── */
+.del-btn {
+  background: none; border: 1px solid transparent; border-radius: 4px;
+  color: var(--muted); font-size: 12px; padding: 2px 6px; cursor: pointer;
+  flex-shrink: 0; transition: color .1s, border-color .1s;
+}
+.del-btn:hover { color: var(--red); border-color: var(--red); }
+
+/* ── Model selector for chat ─────────────────────────────────── */
+#chat-model-bar { padding: 6px 14px; border-bottom: 1px solid var(--border); background: var(--bg2); display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+#chat-model-bar select { background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>⬡ Agent Dashboard</h1>
+  <div class="stat-pill">Sessions: <span id="tb-sessions">—</span></div>
+  <div class="stat-pill">Boards: <span id="tb-boards">—</span></div>
+  <div class="stat-pill">Meetings: <span id="tb-meetings">—</span></div>
+  <div class="stat-pill">Cost: <span id="tb-cost">—</span></div>
+  <div id="live-dot"></div>
+  <div id="live-time">—</div>
+</div>
+
+<div id="layout">
+  <div id="sidebar">
+    <div class="nav-section">Views</div>
+    <div class="nav-item active" data-view="overview" onclick="nav('overview')"><span class="nav-icon">◉</span> Overview</div>
+    <div class="nav-item" data-view="chat"     onclick="nav('chat')"><span class="nav-icon">✦</span> New Chat</div>
+    <div class="nav-item" data-view="sessions" onclick="nav('sessions')"><span class="nav-icon">◈</span> Sessions</div>
+    <div class="nav-item" data-view="kanban"   onclick="nav('kanban')"><span class="nav-icon">⊞</span> Kanban</div>
+    <div class="nav-item" data-view="meetings" onclick="nav('meetings')"><span class="nav-icon">◎</span> Meetings</div>
+    <div class="nav-item" data-view="costs"    onclick="nav('costs')"><span class="nav-icon">◇</span> Costs</div>
+
+    <div class="nav-section" id="active-boards-section" style="display:none">Active Boards</div>
+    <div id="active-boards-nav"></div>
+    <div class="nav-section" id="open-meetings-section" style="display:none">Open Meetings</div>
+    <div id="open-meetings-nav"></div>
+  </div>
+
+  <div id="main"><div class="loading">Loading…</div></div>
+</div>
+
+<script>
+// ── Content store (avoids inline onclick data escaping issues) ──
+const _cs = new Map();   // id → raw text (for tool call args and tool results)
+let _csIdx = 0;
+function csStore(text) { const id = 'cs' + (++_csIdx); _cs.set(id, text); return id; }
+function csExpand(id, btn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const full = _cs.get(el.dataset.csId);
+  if (full !== undefined) { el.textContent = full; el.style.maxHeight = 'none'; el.style.overflow = 'visible'; el.classList.add('expanded'); }
+  if (btn) btn.remove();
+}
+function csToggle(id, btn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const isCollapsed = el.classList.contains('collapsed');
+  if (isCollapsed) {
+    el.classList.remove('collapsed');
+    if (btn) btn.textContent = 'collapse';
+  } else {
+    el.classList.add('collapsed');
+    if (btn) btn.textContent = 'expand';
+  }
+}
+
+// ── State ──────────────────────────────────────────────────────
+let currentView = 'overview';
+let _chatSessionId  = null;
+let _chatSSE        = null;
+let _chatRunning    = false;
+let _streamLog      = null;   // current stream-log div
+let _currentToolEl  = null;   // current running tool div
+let _toolStartMs    = 0;      // when current tool started
+
+// ── Navigation ─────────────────────────────────────────────────
+function nav(view, params) {
+  currentView = view;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
+  renderView(view, params);
+}
+
+function renderView(view, params) {
+  const main = document.getElementById('main');
+  if (view !== 'chat') main.style.padding = '18px 20px';
+  else main.style.padding = '0';
+  main.innerHTML = '<div class="loading">Loading…</div>';
+  switch (view) {
+    case 'overview':  renderOverview();          break;
+    case 'chat':      renderChat();              break;
+    case 'sessions':  renderSessions();          break;
+    case 'session':   renderSession(params);     break;
+    case 'kanban':    renderKanbanList();         break;
+    case 'board':     renderBoard(params);        break;
+    case 'meetings':  renderMeetingList();        break;
+    case 'meeting':   renderMeeting(params);      break;
+    case 'costs':     renderCosts();             break;
+  }
+}
+
+// ── Overview ────────────────────────────────────────────────────
+async function renderOverview() {
+  const data = await api('/api/overview');
+  updateTopbar(data); updateSidebarLive(data);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="overview-grid">
+      <div class="stat-card"><div class="label">Sessions</div><div class="value c-cyan">${data.session_count}</div></div>
+      <div class="stat-card"><div class="label">Active Boards</div><div class="value c-green">${data.active_board_count}<span style="font-size:13px;color:var(--muted)"> / ${data.board_count}</span></div></div>
+      <div class="stat-card"><div class="label">Open Meetings</div><div class="value c-yellow">${data.open_meeting_count}<span style="font-size:13px;color:var(--muted)"> / ${data.meeting_count}</span></div></div>
+      <div class="stat-card"><div class="label">Total Cost</div><div class="value c-purple">$${(data.total_cost||0).toFixed(4)}</div></div>
+    </div>
+    ${data.active_boards.length ? `
+      <div class="section-title">Active Kanban Boards</div>
+      ${data.active_boards.map(b=>`
+        <div class="panel" style="cursor:pointer;margin-bottom:8px" onclick="nav('board','${b.name}')">
+          <div class="panel-header">⊞ ${esc(b.name)}
+            ${Object.entries(b.status_counts||{}).map(([s,n])=>`<span class="tag ${s}">${n} ${s}</span>`).join('')}
+          </div>
+        </div>`).join('')}` : ''}
+    ${data.open_meetings.length ? `
+      <div class="section-title">Open Meetings</div>
+      ${data.open_meetings.map(m=>`
+        <div class="panel" style="cursor:pointer;margin-bottom:8px" onclick="nav('meeting','${m.meeting_id}')">
+          <div class="panel-header">◎ ${esc(m.name||m.meeting_id||'')}
+            <span style="color:var(--muted);font-size:11px;font-weight:400;font-family:var(--mono)">${esc(m.meeting_id||'')}</span>
+            <span class="meeting-status open" style="margin-left:auto">open</span>
+          </div>
+        </div>`).join('')}` : ''}
+    <div class="section-title">Recent Sessions</div>
+    <div class="panel">
+      ${data.recent_sessions.map(s=>`
+        <div class="session-row" onclick="nav('session','${s.id}')">
+          <div class="s-id">${esc(s.id)}</div>
+          <div class="s-model">${esc(s.model||'—')}</div>
+          <div class="s-msgs">${s.message_count} msgs</div>
+          <div class="s-date">${s.created_at}</div>
+        </div>`).join('')}
+      ${!data.recent_sessions.length ? '<div class="empty-state">No sessions yet</div>' : ''}
+    </div>`;
+}
+
+// ── Chat ────────────────────────────────────────────────────────
+function renderChat(sessionId) {
+  if (sessionId) _chatSessionId = sessionId;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div id="chat-area" style="height:100%;display:flex;flex-direction:column">
+      <div id="chat-model-bar">
+        Model:
+        <select id="chat-model">
+          <option value="">— default —</option>
+          <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+          <option value="deepseek-chat">deepseek-chat</option>
+          <option value="deepseek-reasoner">deepseek-reasoner</option>
+          <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
+          <option value="claude-haiku-4-5">claude-haiku-4-5</option>
+        </select>
+        ${_chatSessionId ? `<span style="margin-left:10px" class="sid">session: ${_chatSessionId}</span>
+          <button class="del-btn" onclick="newChat()" style="margin-left:auto">New ＋</button>` : ''}
+      </div>
+      <div id="chat-messages">
+        ${!_chatSessionId ? '<div class="chat-msg sys-msg">New session — send a message to begin</div>' : ''}
+      </div>
+      <div id="chat-input-bar">
+        <textarea id="chat-input" placeholder="Message…" rows="1" onkeydown="chatKeydown(event)"></textarea>
+        <button id="chat-send" onclick="chatSend()">Send</button>
+      </div>
+    </div>`;
+
+  // Load existing history if resuming
+  if (_chatSessionId) {
+    loadChatHistory(_chatSessionId);
+  }
+
+  document.getElementById('chat-input').focus();
+  autoResizeTextarea(document.getElementById('chat-input'));
+}
+
+function newChat() {
+  _chatSessionId = null;
+  if (_chatSSE) { _chatSSE.close(); _chatSSE = null; }
+  renderChat();
+}
+
+async function loadChatHistory(sid) {
+  try {
+    const data = await api(`/api/sessions/${sid}`);
+    const msgs = data.messages || [];
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+    container.innerHTML = '';
+    for (const m of msgs) {
+      if (m.role === 'user') appendChatMsg('user', typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
+      else if (m.role === 'assistant' && m.content) appendChatMsg('bot', m.content);
+    }
+    container.scrollTop = container.scrollHeight;
+  } catch {}
+}
+
+function chatKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatSend(); }
+}
+
+function autoResizeTextarea(el) {
+  el.addEventListener('input', () => { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px'; });
+}
+
+async function chatSend() {
+  if (_chatRunning) return;
+  const input = document.getElementById('chat-input');
+  const msg = (input.value || '').trim();
+  if (!msg) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+
+  const model = document.getElementById('chat-model')?.value || '';
+  appendChatMsg('user', msg);
+  _chatRunning = true;
+  document.getElementById('chat-send').disabled = true;
+
+  // Create stream log container
+  const logEl = document.createElement('div');
+  logEl.className = 'stream-log';
+  document.getElementById('chat-messages').appendChild(logEl);
+  _streamLog     = logEl;
+  _currentToolEl = null;
+  _toolStartMs   = 0;
+  scrollChat();
+
+  try {
+    const body = { message: msg, model: model || undefined };
+    if (_chatSessionId) body.session_id = _chatSessionId;
+    const resp = await apiFetch('/api/chat', { method: 'POST', body: JSON.stringify(body) });
+    _chatSessionId = resp.session_id;
+
+    const header = document.querySelector('#chat-model-bar .sid');
+    if (header) header.textContent = `session: ${_chatSessionId}`;
+    else document.getElementById('chat-model-bar').innerHTML +=
+      `<span class="sid" style="margin-left:10px">session: ${_chatSessionId}</span>`+
+      `<button class="del-btn" onclick="newChat()" style="margin-left:auto">New ＋</button>`;
+
+    if (_chatSSE) _chatSSE.close();
+    _chatSSE = new EventSource(`/api/chat/${_chatSessionId}/stream`);
+    _chatSSE.onmessage = (e) => { try { handleChatEvent(JSON.parse(e.data)); } catch {} };
+    _chatSSE.onerror = () => {
+      _streamSysMsg('⚠ connection lost');
+      _chatFinish(); _chatSSE.close();
+    };
+  } catch(err) {
+    _streamSysMsg('⚠ ' + err.message);
+    _chatFinish();
+  }
+}
+
+function handleChatEvent(ev) {
+  const type = ev.type;
+  if (type === 'iteration') {
+    _streamFinishTool();
+    const el = document.createElement('div');
+    el.className = 'stream-iter';
+    el.innerHTML = `<span class="stream-iter-num">#${ev.i}</span> iteration`;
+    _streamLog && _streamLog.appendChild(el);
+    scrollChat();
+
+  } else if (type === 'tool_start') {
+    _streamFinishTool();
+    _toolStartMs = Date.now();
+    const argsText = ev.args || '';
+    const toolId   = 'st-' + Date.now();
+    const el = document.createElement('div');
+    el.className = 'stream-tool running';
+    el.innerHTML = `
+      <div class="stream-tool-row" onclick="streamToggleArgs('${toolId}')">
+        <span class="stream-tool-icon"><span class="spinner"></span></span>
+        <span class="stream-tool-name">${esc(ev.name||'')}</span>
+        <span class="stream-tool-elapsed" id="e-${toolId}"></span>
+        <span class="stream-tool-chevron" id="ch-${toolId}">▸</span>
+      </div>
+      <pre class="stream-tool-args" id="${toolId}">${esc(argsText)}</pre>`;
+    _streamLog && _streamLog.appendChild(el);
+    _currentToolEl = el;
+    scrollChat();
+
+  } else if (type === 'tool_end') {
+    _streamFinishTool();
+    scrollChat();
+
+  } else if (type === 'event') {
+    const detail = [ev.label, ev.detail].filter(Boolean).join(' ');
+    if (detail) _streamSysMsg(detail);
+
+  } else if (type === 'compact') {
+    _streamFinishTool();
+    _streamSysMsg('⟳ compacting context…');
+
+  } else if (type === 'final_answer') {
+    _streamFinishTool();
+
+  } else if (type === 'done') {
+    _streamFinishTool();
+    if (ev.final) appendChatMsg('bot', ev.final);
+    _chatFinish();
+    _chatSSE && _chatSSE.close();
+    scrollChat();
+
+  } else if (type === 'error') {
+    _streamFinishTool(true);
+    appendChatMsg('sys', '⚠ ' + (ev.error || 'error'));
+    _chatFinish();
+    _chatSSE && _chatSSE.close();
+  }
+}
+
+function _streamFinishTool(isErr) {
+  if (!_currentToolEl) return;
+  const elapsed = _toolStartMs ? ((Date.now() - _toolStartMs) / 1000).toFixed(1) + 's' : '';
+  _currentToolEl.classList.remove('running');
+  _currentToolEl.classList.add(isErr ? 'error' : 'done');
+  const icon = _currentToolEl.querySelector('.stream-tool-icon');
+  if (icon) icon.innerHTML = isErr ? '<span style="color:var(--red)">✗</span>' : '<span style="color:var(--green)">✓</span>';
+  const et = _currentToolEl.querySelector('[id^="e-"]');
+  if (et && elapsed) et.textContent = elapsed;
+  _currentToolEl = null;
+  _toolStartMs   = 0;
+}
+
+function _streamSysMsg(text) {
+  if (!_streamLog) return;
+  const el = document.createElement('div');
+  el.className = 'stream-sys';
+  el.textContent = text;
+  _streamLog.appendChild(el);
+  scrollChat();
+}
+
+function _chatFinish() {
+  _chatRunning = false;
+  const btn = document.getElementById('chat-send');
+  if (btn) btn.disabled = false;
+  _streamLog    = null;
+  _currentToolEl = null;
+}
+
+function streamToggleArgs(toolId) {
+  const argsEl = document.getElementById(toolId);
+  const chevEl = document.getElementById('ch-' + toolId);
+  if (!argsEl) return;
+  const open = argsEl.classList.toggle('open');
+  if (chevEl) chevEl.textContent = open ? '▾' : '▸';
+}
+
+function appendChatMsg(role, text) {
+  const container = document.getElementById('chat-messages');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.className = `chat-msg ${role === 'user' ? 'user-msg' : role === 'sys' ? 'sys-msg' : 'bot-msg'}`;
+  div.textContent = text;
+  container.appendChild(div);
+  scrollChat();
+}
+
+function scrollChat() {
+  const c = document.getElementById('chat-messages');
+  if (c) c.scrollTop = c.scrollHeight;
+}
+function removeEl(id) { const el = document.getElementById(id); if (el) el.remove(); }
+
+// ── Sessions list ────────────────────────────────────────────────
+async function renderSessions() {
+  const sessions = await api('/api/sessions');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="section-title">All Sessions (${sessions.length})</div>
+    <div class="panel">
+      <div style="display:flex;padding:5px 11px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em">
+        <span style="flex:1">Session ID</span>
+        <span style="min-width:110px">Model</span>
+        <span style="min-width:50px;text-align:right">Msgs</span>
+        <span style="min-width:70px;text-align:right">Tokens</span>
+        <span style="min-width:70px;text-align:right">Cost</span>
+        <span style="min-width:115px;text-align:right">Date</span>
+        <span style="width:32px"></span>
+      </div>
+      ${sessions.map(s=>`
+        <div class="session-row">
+          <div class="s-id" onclick="nav('session','${s.id}')">${esc(s.id)}</div>
+          <div class="s-model" onclick="nav('session','${s.id}')">${esc(s.model||'—')}</div>
+          <div class="s-msgs"  onclick="nav('session','${s.id}')">${s.message_count}</div>
+          <div class="s-msgs"  onclick="nav('session','${s.id}')" style="color:var(--muted)">${fmtTok(s.in_tokens+s.out_tokens)}</div>
+          <div class="s-cost"  onclick="nav('session','${s.id}')">${s.cost>0?'$'+s.cost.toFixed(4):'—'}</div>
+          <div class="s-date"  onclick="nav('session','${s.id}')">${s.created_at}</div>
+          <button class="del-btn" title="Delete" onclick="deleteSession('${s.id}',this)">✕</button>
+        </div>`).join('')}
+      ${!sessions.length ? '<div class="empty-state">No sessions yet</div>' : ''}
+    </div>`;
+}
+
+async function deleteSession(id, btn) {
+  if (!confirm(`Delete session ${id}?`)) return;
+  await apiFetch(`/api/sessions/${id}`, {method:'DELETE'});
+  btn.closest('.session-row').remove();
+  updateStatPill('tb-sessions');
+}
+
+// ── Session detail ────────────────────────────────────────────────
+async function renderSession(sessionId) {
+  const data = await api(`/api/sessions/${sessionId}`);
+  const main = document.getElementById('main');
+  const msgs = data.messages || [];
+  const userCount = msgs.filter(m=>m.role==='user').length;
+  main.innerHTML = `
+    <button class="back-btn" onclick="nav('sessions')">← Sessions</button>
+    <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-family:var(--mono);font-size:12px;color:var(--cyan)">${esc(sessionId)}</span>
+      <span style="color:var(--purple);font-size:12px">${esc(data.model||'')}</span>
+      <span style="color:var(--muted);font-size:11px">${userCount} turns · in:${fmtTok(data.in_tokens)} out:${fmtTok(data.out_tokens)}</span>
+      ${data.cost>0?`<span style="color:var(--yellow);font-family:var(--mono);font-size:12px">$${data.cost.toFixed(4)}</span>`:''}
+      <button class="back-btn" style="margin:0;margin-left:auto" onclick="resumeChat('${sessionId}')">Continue chat ↗</button>
+    </div>
+    <div class="message-list" id="msg-list">
+      ${msgs.map((m,i)=>renderMessage(m,i)).join('')}
+    </div>`;
+}
+
+function resumeChat(sessionId) {
+  _chatSessionId = sessionId;
+  nav('chat');
+}
+
+function renderMessage(msg, idx) {
+  const role = msg.role || '';
+  if (role === 'system') return '';
+
+  let content = '';
+  if (role === 'user') {
+    const text = typeof msg.content === 'string' ? msg.content : (Array.isArray(msg.content) ? msg.content.map(c=>c.text||'').join('\n') : JSON.stringify(msg.content, null, 2));
+    content = `<div class="msg-content">${esc(text)}</div>`;
+  } else if (role === 'assistant') {
+    const text = msg.content || '';
+    const tcs  = msg.tool_calls || [];
+    const thinkContent = msg.thinking || '';
+    content = `
+      ${thinkContent ? `<details style="margin-bottom:6px"><summary style="color:var(--muted);font-size:11px;cursor:pointer">thinking…</summary><div style="padding:6px;color:var(--muted);font-size:11px;white-space:pre-wrap;font-family:var(--mono)">${esc(thinkContent)}</div></details>` : ''}
+      ${text ? `<div class="msg-content">${esc(text)}</div>` : ''}
+      ${tcs.map(tc => {
+        const fn = tc.function || {};
+        let argsText = fn.arguments || '';
+        try { argsText = JSON.stringify(JSON.parse(argsText), null, 2); } catch {}
+        const elId  = 'tc' + idx + '_' + (tc.id||'').slice(-6);
+        const csId  = csStore(argsText);
+        const long  = argsText.length > 2000;
+        return `<div class="tool-call">
+          <span class="tool-call-name">${esc(fn.name||'')}</span>
+          <div class="tool-call-args${long ? ' collapsed' : ''}" id="${elId}" data-cs-id="${csId}">${esc(argsText)}</div>
+          ${long ? `<button class="expand-btn" onclick="csToggle('${elId}',this)">expand</button>` : ''}
+        </div>`;
+      }).join('')}`;
+  } else if (role === 'tool') {
+    const text = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2);
+    const elId  = 'tr' + idx;
+    const csId  = csStore(text);
+    const long  = text.length > 2000;
+    content = `
+      <div class="msg-content${long ? ' collapsed' : ''}" id="${elId}" data-cs-id="${csId}" style="font-family:var(--mono);font-size:11px;color:var(--muted)">${esc(text)}</div>
+      ${long ? `<button class="expand-btn" onclick="csToggle('${elId}',this)">expand</button>` : ''}`;
+  }
+
+  const roleLabel = role === 'tool' ? `tool result${msg.tool_call_id ? ' · '+msg.tool_call_id.slice(-8) : ''}` : role;
+  return `<div class="msg ${role}"><div class="msg-role">${roleLabel}</div>${content}</div>`;
+}
+
+// ── Kanban list ───────────────────────────────────────────────────
+async function renderKanbanList() {
+  const boards = await api('/api/kanban');
+  const main = document.getElementById('main');
+  if (!boards.length) { main.innerHTML = '<div class="empty-state">No boards found</div>'; return; }
+  main.innerHTML = `
+    <div class="section-title">Kanban Boards (${boards.length})</div>
+    ${boards.map(b=>`
+      <div class="panel" style="margin-bottom:8px">
+        <div class="panel-header">
+          <span style="cursor:pointer;flex:1" onclick="nav('board','${b.name}')">⊞ ${esc(b.name)}
+            ${b.has_active?'<span class="tag running" style="margin-left:4px">active</span>':''}
+          </span>
+          ${Object.entries(b.status_counts||{}).map(([s,n])=>`<span class="tag ${s}">${n} ${s}</span>`).join('')}
+          <span style="color:var(--muted);font-size:11px">${b.task_count} tasks</span>
+          <button class="del-btn" title="Delete board" onclick="deleteBoard('${b.name}',this)">✕</button>
+        </div>
+      </div>`).join('')}`;
+}
+
+async function deleteBoard(name, btn) {
+  if (!confirm(`Delete board "${name}"? This removes all task files.`)) return;
+  await apiFetch(`/api/kanban/${name}`, {method:'DELETE'});
+  btn.closest('.panel').remove();
+}
+
+// ── Board detail ──────────────────────────────────────────────────
+async function renderBoard(boardName) {
+  const data = await api(`/api/kanban/${boardName}`);
+  const main = document.getElementById('main');
+  const tasks = Object.values(data.tasks || {});
+  const byStatus = {ready:[],running:[],done:[],error:[]};
+  for (const t of tasks) {
+    const s = t.status || 'ready';
+    if (s === 'blocked' || s === 'cancelled') { byStatus.error.push(t); continue; }
+    if (byStatus[s]) byStatus[s].push(t); else byStatus.ready.push(t);
+  }
+  const cols = [{k:'ready',l:'Ready'},{k:'running',l:'Running'},{k:'done',l:'Done'},{k:'error',l:'Error/Blocked'}];
+  main.innerHTML = `
+    <button class="back-btn" onclick="nav('kanban')">← Boards</button>
+    <div class="panel">
+      <div class="panel-header">
+        ⊞ ${esc(boardName)}
+        <span style="margin-left:auto;color:var(--muted);font-size:11px">${tasks.length} tasks</span>
+        <button class="del-btn" onclick="deleteBoardNav('${boardName}')">Delete board</button>
+      </div>
+      <div class="panel-body">
+        <div class="kanban-columns">
+          ${cols.map(col=>`
+            <div class="kanban-col col-${col.k}">
+              <div class="kanban-col-header">${col.l} (${byStatus[col.k].length})</div>
+              ${byStatus[col.k].map(t=>renderTaskCard(t)).join('')}
+              ${!byStatus[col.k].length ? '<div style="color:var(--muted);font-size:10px;padding:3px">—</div>' : ''}
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function deleteBoardNav(name) {
+  if (!confirm(`Delete board "${name}"?`)) return;
+  apiFetch(`/api/kanban/${name}`, {method:'DELETE'}).then(() => nav('kanban'));
+}
+
+function renderTaskCard(task) {
+  const id = (task.id||'').replace(/[^a-z0-9]/gi,'_');
+  const title   = task.title || task.id || '';
+  const skill   = task.skill || '';
+  const elapsed = task.elapsed_s;
+  const output  = task.worker_output || '';
+  return `
+    <div class="task-card" id="tc_${id}" onclick="toggleTask('tc_${id}')">
+      <div class="task-title">${esc(title)}</div>
+      <div class="task-id">${esc(task.id||'')}</div>
+      ${skill  ? `<div class="task-skill">${esc(skill)}</div>` : ''}
+      ${elapsed ? `<div class="task-timer">⏱ ${elapsed.toFixed(0)}s</div>` : ''}
+      ${output  ? `<div class="task-output">${esc(output)}</div>` : ''}
+    </div>`;
+}
+function toggleTask(id) { const el=document.getElementById(id); if(el) el.classList.toggle('expanded'); }
+
+// ── Meeting list ──────────────────────────────────────────────────
+async function renderMeetingList() {
+  const meetings = await api('/api/meetings');
+  const main = document.getElementById('main');
+  if (!meetings.length) { main.innerHTML = '<div class="empty-state">No meetings found</div>'; return; }
+  main.innerHTML = `
+    <div class="section-title">Meetings (${meetings.length})</div>
+    ${meetings.map(m=>`
+      <div class="panel" style="margin-bottom:8px">
+        <div class="panel-header">
+          <span style="cursor:pointer;flex:1" onclick="nav('meeting','${m.meeting_id}')">
+            ◎ ${esc(m.name||m.meeting_id||'')}
+            <span class="meeting-status ${m.closed_at?'closed':'open'}">${m.closed_at?'closed':'open'}</span>
+            <span style="color:var(--muted);font-size:10px;font-family:var(--mono);font-weight:400">${esc(m.meeting_id||'')}</span>
+          </span>
+          <span style="color:var(--muted);font-size:11px">${m.participant_count} participants</span>
+          <button class="del-btn" title="Delete meeting" onclick="deleteMeeting('${m.meeting_id}',this)">✕</button>
+        </div>
+        ${m.agenda ? `<div class="panel-body" style="font-size:12px;color:var(--muted)">${esc(m.agenda)}</div>` : ''}
+      </div>`).join('')}`;
+}
+
+async function deleteMeeting(id, btn) {
+  if (!confirm(`Delete meeting ${id}?`)) return;
+  await apiFetch(`/api/meetings/${id}`, {method:'DELETE'});
+  btn.closest('.panel').remove();
+}
+
+// ── Meeting detail ─────────────────────────────────────────────────
+async function renderMeeting(meetingId) {
+  const data = await api(`/api/meetings/${meetingId}`);
+  const main = document.getElementById('main');
+  const participants = data.participants || {};
+  const transcript   = data.transcript  || [];
+  const lastResp = {};
+  for (const e of transcript) { if (e.speaker !== 'moderator') lastResp[e.speaker] = e.content || ''; }
+
+  main.innerHTML = `
+    <button class="back-btn" onclick="nav('meetings')">← Meetings</button>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+      <span style="font-size:13px;font-weight:600;color:var(--cyan)">◎ ${esc(data.name||meetingId)}</span>
+      <span style="color:var(--muted);font-size:10px;font-family:var(--mono)">${esc(meetingId)}</span>
+      <span class="meeting-status ${data.closed_at?'closed':'open'}">${data.closed_at?'closed':'open'}</span>
+      ${data.agenda ? `<span style="color:var(--muted);font-size:12px">${esc(data.agenda)}</span>` : ''}
+      <button class="del-btn" style="margin-left:auto" onclick="deleteMeetingNav('${meetingId}')">Delete</button>
+    </div>
+    <div class="participants-grid">
+      ${Object.values(participants).map(p=>`
+        <div class="participant-card ${lastResp[p.name]?'spoke':''}">
+          <div class="p-name">${esc(p.name)}</div>
+          <div class="p-role">${esc(p.role||'')}</div>
+          <div class="p-response">${lastResp[p.name]?esc(lastResp[p.name]):'<em style="color:var(--muted)">has not spoken</em>'}</div>
+        </div>`).join('')}
+    </div>
+    ${data.notes ? `<div class="notes-box">${esc(data.notes)}</div>` : ''}
+    ${transcript.length ? `
+      <div class="section-title" style="margin-top:12px">Transcript (${transcript.length})</div>
+      ${transcript.map(e=>`
+        <div class="transcript-entry ${e.speaker==='moderator'?'moderator':''}">
+          <div class="t-speaker">${esc(e.speaker||'')}</div>
+          <div class="t-content">${esc(e.content||'')}</div>
+        </div>`).join('')}` : ''}
+    ${data.conclusion ? `<div class="conclusion-box">${esc(data.conclusion)}</div>` : ''}`;
+}
+
+function deleteMeetingNav(id) {
+  if (!confirm(`Delete meeting ${id}?`)) return;
+  apiFetch(`/api/meetings/${id}`, {method:'DELETE'}).then(() => nav('meetings'));
+}
+
+// ── Costs ──────────────────────────────────────────────────────────
+async function renderCosts() {
+  const data = await api('/api/costs');
+  const main = document.getElementById('main');
+  const models = Object.entries(data.by_model||{}).sort((a,b)=>b[1].cost-a[1].cost);
+  const bySession = Object.entries(data.by_session||{}).sort((a,b)=>b[1].cost-a[1].cost).slice(0,20);
+  main.innerHTML = `
+    <div class="overview-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat-card"><div class="label">Total Cost</div><div class="value c-yellow">$${(data.total_cost||0).toFixed(4)}</div></div>
+      <div class="stat-card"><div class="label">Input Tokens</div><div class="value c-cyan">${fmtTok(data.total_in)}</div></div>
+      <div class="stat-card"><div class="label">Output Tokens</div><div class="value c-purple">${fmtTok(data.total_out)}</div></div>
+    </div>
+    <div class="section-title">By Model</div>
+    <div class="panel" style="margin-bottom:14px">
+      <table class="cost-table"><thead><tr>
+        <th>Model</th><th>Calls</th><th>Input</th><th>Output</th><th>$/1M in/out</th><th>Cost</th>
+      </tr></thead><tbody>
+        ${models.map(([model,m])=>{
+          const p = findPrice(model, data.prices);
+          return `<tr>
+            <td style="font-family:var(--mono);font-size:11px">${esc(model)}</td>
+            <td class="num">${m.calls}</td>
+            <td class="num">${fmtTok(m.in)}</td>
+            <td class="num">${fmtTok(m.out)}</td>
+            <td style="color:var(--muted);font-size:10px">${p?`$${p.in}/$${p.out}`:'—'}</td>
+            <td class="num cost-val">$${m.cost.toFixed(4)}</td>
+          </tr>`;}).join('')}
+        ${!models.length?'<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">No usage data yet</td></tr>':''}
+      </tbody></table>
+    </div>
+    <div class="section-title">Top Sessions by Cost</div>
+    <div class="panel">
+      <table class="cost-table"><thead><tr>
+        <th>Session</th><th>Model</th><th>Input</th><th>Output</th><th>Cost</th>
+      </tr></thead><tbody>
+        ${bySession.map(([sid,s])=>`
+          <tr style="cursor:pointer" onclick="nav('session','${sid}')">
+            <td style="font-family:var(--mono);color:var(--cyan);font-size:11px">${esc(sid)}</td>
+            <td style="color:var(--purple);font-size:11px">${esc(s.model||'')}</td>
+            <td class="num">${fmtTok(s.in)}</td>
+            <td class="num">${fmtTok(s.out)}</td>
+            <td class="num cost-val">$${s.cost.toFixed(4)}</td>
+          </tr>`).join('')}
+        ${!bySession.length?'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:16px">No usage data yet</td></tr>':''}
+      </tbody></table>
+    </div>`;
+}
+
+// ── Topbar / sidebar ────────────────────────────────────────────────
+function updateTopbar(data) {
+  setText('tb-sessions', data.session_count);
+  setText('tb-boards', `${data.active_board_count}/${data.board_count}`);
+  setText('tb-meetings', `${data.open_meeting_count}/${data.meeting_count}`);
+  setText('tb-cost', `$${(data.total_cost||0).toFixed(4)}`);
+}
+function updateSidebarLive(data) {
+  const ab = data.active_boards||[], om = data.open_meetings||[];
+  const bs = document.getElementById('active-boards-section');
+  const bn = document.getElementById('active-boards-nav');
+  const ms = document.getElementById('open-meetings-section');
+  const mn = document.getElementById('open-meetings-nav');
+  bs.style.display = ab.length ? '' : 'none';
+  bn.innerHTML = ab.map(b=>`<div class="nav-item" onclick="nav('board','${b.name}')"><span class="nav-icon">⊞</span>${esc(b.name)}<span class="badge">${(b.status_counts||{}).running||0}</span></div>`).join('');
+  ms.style.display = om.length ? '' : 'none';
+  mn.innerHTML = om.map(m=>`<div class="nav-item" onclick="nav('meeting','${m.meeting_id}')"><span class="nav-icon">◎</span>${esc((m.name||m.meeting_id||'').slice(0,18))}</div>`).join('');
+}
+
+// ── SSE live updates ─────────────────────────────────────────────────
+function startSSE() {
+  const es = new EventSource('/api/events');
+  es.onmessage = (e) => {
+    document.getElementById('live-time').textContent = new Date().toLocaleTimeString();
+    api('/api/overview').then(data => { updateTopbar(data); updateSidebarLive(data); }).catch(()=>{});
+  };
+  es.onerror = () => { document.getElementById('live-dot').style.background = 'var(--red)'; };
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+async function api(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+async function apiFetch(url, opts={}) {
+  const res = await fetch(url, {headers: {'Content-Type': 'application/json'}, ...opts});
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+function esc(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function setText(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
+function fmtTok(n) {
+  if(!n) return '0';
+  if(n>=1_000_000) return (n/1_000_000).toFixed(1)+'M';
+  if(n>=1_000)     return (n/1_000).toFixed(1)+'K';
+  return String(n);
+}
+function findPrice(model, prices) {
+  const m=(model||'').toLowerCase();
+  for(const [k,p] of Object.entries(prices||{})) { if(m.includes(k)) return p; }
+  return null;
+}
+function updateStatPill(id) {
+  api('/api/overview').then(d => { updateTopbar(d); updateSidebarLive(d); }).catch(()=>{});
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => { nav('overview'); startSSE(); });
+</script>
+</body>
+</html>

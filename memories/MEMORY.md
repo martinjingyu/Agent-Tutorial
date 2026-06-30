@@ -37,3 +37,7 @@ browser_navigate snapshot structure: The tool returns a dict with `success` (boo
 browser_snapshot (full mode) can reveal content hidden in tab panels, accordions, or collapsed sections that aren't visible in the initial browser_navigate snapshot. Workflow: navigate → if main content is missing → browser_scroll → browser_snapshot again. This is common on university program pages (e.g., guide.wisc.edu uses tab panels for Overview/Requirements/Outcomes).
 §
 subprocess_worker.py (Kanban worker) does NOT register meeting tools (register_meeting_tools is missing). This means Kanban workers cannot use meeting_moderator tools (meeting_create_participants, meeting_set_agenda, meeting_ask_one, meeting_chain, meeting_group_discuss, meeting_add_notes, meeting_conclude). If a Kanban task needs to run a meeting, the subprocess_worker.py must be updated to include register_meeting_tools in its tool registration. Alternatively, the main agent should call meeting tools directly instead of dispatching to Kanban.
+§
+oa-generation skill 的 Step 5 最终审查必须包含"审查→发现缺陷→修改→再确认"的闭环流程，而非一次性的"审查→给结论"。主 agent 在审查会议中承担双重角色：会议主持人（调用 meeting 工具）和执行者（write_file/patch_file 修改文件）。这个闭环流程已写入 oa-generation skill 的 Step 5。
+§
+skill_manage 的 name 校验 bug 已修复：VALID_NAME_RE 正则从 r"^[a-z0-9][a-z0-9._-]*$" 改为 r"^[a-z0-9][a-z0-9./._-]*$"，增加了斜杠 / 支持。根因是正则不允许 category/name 格式（如 hr-recruitment/oa-generation），而所有 skill 的 name 都天然包含斜杠。修复后 skill_manage 的 create/edit/patch/write_file/remove_file 均可正常处理带斜杠的 name。

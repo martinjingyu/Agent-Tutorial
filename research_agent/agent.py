@@ -23,6 +23,32 @@ COMPACT_AFTER_FINAL_TOOL_COUNT = 8
 """If the number of tool results after the last final_response exceeds this,
 the agent will compact before executing the next batch of tool calls."""
 
+
+def _log_usage(response: Any, model: str, provider: str, session_id: str) -> None:
+    """Append one line to sessions/usage_log.jsonl with token counts from this LLM call."""
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        in_tok  = getattr(usage, "prompt_tokens",     None) or getattr(usage, "input_tokens",  0)
+        out_tok = getattr(usage, "completion_tokens", None) or getattr(usage, "output_tokens", 0)
+        if not in_tok and not out_tok:
+            return
+        from datetime import datetime
+        entry = json.dumps({
+            "ts":         datetime.now().isoformat(timespec="seconds"),
+            "session_id": session_id,
+            "model":      model,
+            "provider":   provider,
+            "in":         in_tok,
+            "out":        out_tok,
+        }, ensure_ascii=False)
+        log_path = SESSIONS_DIR / "usage_log.jsonl"
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
+    except Exception:
+        pass
+
 MAX_TOOL_RESULT_CHARS = 8_000
 SPILL_PREVIEW_CHARS = 600
 SNAPSHOT_TOOL_NAMES = {"browser_navigate", "browser_snapshot"}
@@ -82,7 +108,7 @@ class GeneralAgent:
         max_iterations: int = 24,
         context_threshold_tokens: int = 90000,
         auto_compact: bool = True,
-        self_review: bool = True,
+        self_review: bool = False,
         ui: ConsoleUI | None = None,
         live_cache_path: str | Path | None = None,
         live_cache_metadata: dict[str, Any] | None = None,
@@ -91,6 +117,7 @@ class GeneralAgent:
         finish_tools: set[str] | frozenset[str] | None = None,
         candidate_folder: str | Path | None = None,
         session_path: str | Path | None = None,
+        session_id: str | None = None,
     ) -> None:
         ensure_project_dirs()
         load_builtin_tools()
@@ -100,7 +127,7 @@ class GeneralAgent:
         self.auto_compact = auto_compact
         self.self_review_enabled = self_review
         self.ui = ui or ConsoleUI(enabled=True)
-        self.session_id = new_session_id()
+        self.session_id = session_id or new_session_id()
         self.task_id = f"task_{uuid.uuid4().hex[:8]}"
         self._spill_dir = SESSIONS_DIR / ".tool_cache" / self.session_id
         self._spill_counter = 0
@@ -305,6 +332,7 @@ class GeneralAgent:
             self.ui.model_start(iteration)
             try:
                 response = self.llm.chat(api_messages, self._registry.definitions())
+                _log_usage(response, self.llm.model, self.llm.provider, self.session_id)
             except KeyboardInterrupt:
                 correction = self._interrupt_correction()
                 if correction:
@@ -726,12 +754,8 @@ class GeneralAgent:
         while i < len(messages):
             msg = messages[i]
             if msg.get("role") == "tool":
-                repaired.append(
-                    {
-                        "role": "user",
-                        "content": f"[Recovered orphan tool result from {msg.get('name', 'tool')}]: {str(msg.get('content', ''))[:2000]}",
-                    }
-                )
+                # Orphaned tool result with no preceding assistant tool_call —
+                # drop it; injecting as user message pollutes context.
                 i += 1
                 continue
 
@@ -751,12 +775,7 @@ class GeneralAgent:
                         repaired.append(tool_msg)
                         seen.add(tcid)
                     else:
-                        repaired.append(
-                            {
-                                "role": "user",
-                                "content": f"[Recovered orphan tool result from {tool_msg.get('name', 'tool')}]: {str(tool_msg.get('content', ''))[:2000]}",
-                            }
-                        )
+                        pass  # mismatched tool_call_id — drop
                     j += 1
                 for tcid in expected:
                     if tcid not in seen:

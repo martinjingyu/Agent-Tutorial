@@ -1,1 +1,0 @@
-[kanban auto-advance] board=idea-a-deep-research spawned=3

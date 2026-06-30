@@ -48,6 +48,7 @@ description: Execute one task from a candidate-specific CV screening Kanban boar
 | `project-awards` | `hr-recruitment/project-awards-analysis` | browser_navigate, read_file, write_file |
 | `extra-info` | `hr-recruitment/extra-info-collection` | browser_navigate, google_search, read_file, write_file |
 | `final-report` | `hr-recruitment/stage1-screening-report` | read_file, write_file |
+| `oa-evaluation` | `hr-recruitment/oa-evaluation` | read_file, write_file, terminal |
 
 ### Step 5: 输出文件
 

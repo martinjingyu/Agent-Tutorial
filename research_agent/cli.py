@@ -13,6 +13,12 @@ from .ui import ConsoleUI
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Agent-Tutorial general tool-use agent.")
+    subparsers = parser.add_subparsers(dest="command")
+
+    web_p = subparsers.add_parser("web", help="Launch the web dashboard")
+    web_p.add_argument("--port", type=int, default=7654)
+    web_p.add_argument("--host", default="127.0.0.1")
+
     parser.add_argument("prompt", nargs="?", help="Task for the agent")
     parser.add_argument("--model", default=None)
     parser.add_argument("--provider", choices=["deepseek", "codex", "openai"])
@@ -25,6 +31,12 @@ def main() -> None:
     parser.add_argument("--login-browser", action="store_true")
     parser.add_argument("--guardian", action="store_true")
     args = parser.parse_args()
+
+    if args.command == "web":
+        load_dotenv()
+        from .web.server import run as run_web
+        run_web(port=args.port, host=args.host)
+        return
 
     if args.guardian:
         from .guardian import run_guardian
@@ -47,7 +59,7 @@ def main() -> None:
         model=args.model,
         provider=args.provider,
         max_iterations=args.max_iterations,
-        self_review=not args.no_self_review,
+        self_review=False,
         ui=ConsoleUI(enabled=not args.quiet_actions),
     )
     history = _load_history(args.resume) if args.resume else []
