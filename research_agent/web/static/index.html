@@ -168,6 +168,9 @@ body {
 .chat-msg.sys-msg  { align-self: center; font-size: 11px; color: var(--muted); font-family: var(--mono); background: var(--bg3); padding: 3px 10px; border-radius: 10px; }
 .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--border); border-top-color: var(--cyan); border-radius: 50%; animation: spin .6s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.active-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 6px; animation: pulse 1.4s ease-in-out infinite; flex-shrink: 0; }
+@keyframes pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(80,220,100,.5); } 50% { opacity: .8; box-shadow: 0 0 0 4px rgba(80,220,100,0); } }
+.session-row.active { border-left: 2px solid var(--green); }
 
 /* ── Stream log (live tool call feed) ───────────────────────── */
 .stream-log {
@@ -309,13 +312,15 @@ let currentView = 'overview';
 let _chatSessionId  = null;
 let _chatSSE        = null;
 let _chatRunning    = false;
-let _streamLog      = null;   // current stream-log div
-let _currentToolEl  = null;   // current running tool div
-let _toolStartMs    = 0;      // when current tool started
+let _streamLog           = null;   // current stream-log div
+let _currentToolEl       = null;   // current running tool div
+let _toolStartMs         = 0;      // when current tool started
+let _sessionsRefreshTimer = null;  // auto-refresh timer for sessions view
 
 // ── Navigation ─────────────────────────────────────────────────
 function nav(view, params) {
   currentView = view;
+  clearInterval(_sessionsRefreshTimer);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
   renderView(view, params);
 }
@@ -426,14 +431,11 @@ function newChat() {
 async function loadChatHistory(sid) {
   try {
     const data = await api(`/api/sessions/${sid}`);
-    const msgs = data.messages || [];
+    const msgs = (data.messages || []).filter(m => m.role !== 'system');
     const container = document.getElementById('chat-messages');
     if (!container) return;
     container.innerHTML = '';
-    for (const m of msgs) {
-      if (m.role === 'user') appendChatMsg('user', typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
-      else if (m.role === 'assistant' && m.content) appendChatMsg('bot', m.content);
-    }
+    msgs.forEach((m, i) => container.insertAdjacentHTML('beforeend', renderMessage(m, i)));
     container.scrollTop = container.scrollHeight;
   } catch {}
 }
@@ -456,7 +458,9 @@ async function chatSend() {
   input.style.height = 'auto';
 
   const model = document.getElementById('chat-model')?.value || '';
-  appendChatMsg('user', msg);
+  const chatMsgs = document.getElementById('chat-messages');
+  const priorCount = chatMsgs ? chatMsgs.querySelectorAll('.msg').length : 0;
+  chatMsgs && chatMsgs.insertAdjacentHTML('beforeend', renderMessage({role:'user', content:msg}, priorCount));
   _chatRunning = true;
   document.getElementById('chat-send').disabled = true;
 
@@ -540,10 +544,10 @@ function handleChatEvent(ev) {
 
   } else if (type === 'done') {
     _streamFinishTool();
-    if (ev.final) appendChatMsg('bot', ev.final);
     _chatFinish();
     _chatSSE && _chatSSE.close();
-    scrollChat();
+    if (_chatSessionId) loadChatHistory(_chatSessionId);
+    else scrollChat();
 
   } else if (type === 'error') {
     _streamFinishTool(true);
@@ -608,33 +612,67 @@ function scrollChat() {
 function removeEl(id) { const el = document.getElementById(id); if (el) el.remove(); }
 
 // ── Sessions list ────────────────────────────────────────────────
-async function renderSessions() {
-  const sessions = await api('/api/sessions');
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <div class="section-title">All Sessions (${sessions.length})</div>
-    <div class="panel">
-      <div style="display:flex;padding:5px 11px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em">
-        <span style="flex:1">Session ID</span>
-        <span style="min-width:110px">Model</span>
-        <span style="min-width:50px;text-align:right">Msgs</span>
-        <span style="min-width:70px;text-align:right">Tokens</span>
-        <span style="min-width:70px;text-align:right">Cost</span>
-        <span style="min-width:115px;text-align:right">Date</span>
-        <span style="width:32px"></span>
+function _sessionTableHeader() {
+  return `<div style="display:flex;padding:5px 11px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em">
+    <span style="flex:1">Session ID</span><span style="min-width:110px">Model</span>
+    <span style="min-width:50px;text-align:right">Msgs</span>
+    <span style="min-width:70px;text-align:right">Tokens</span>
+    <span style="min-width:70px;text-align:right">Cost</span>
+    <span style="min-width:115px;text-align:right">Date</span>
+    <span style="width:32px"></span></div>`;
+}
+function _sessionRows(list) {
+  if (!list.length) return '<div class="empty-state">No sessions</div>';
+  return list.map(s=>`
+    <div class="session-row${s.is_active ? ' active' : ''}">
+      <div class="s-id" onclick="nav('session','${s.id}')" style="display:flex;align-items:center">
+        ${s.is_active ? '<span class="active-dot" title="Agent running"></span>' : ''}
+        ${esc(s.id)}
       </div>
-      ${sessions.map(s=>`
-        <div class="session-row">
-          <div class="s-id" onclick="nav('session','${s.id}')">${esc(s.id)}</div>
-          <div class="s-model" onclick="nav('session','${s.id}')">${esc(s.model||'—')}</div>
-          <div class="s-msgs"  onclick="nav('session','${s.id}')">${s.message_count}</div>
-          <div class="s-msgs"  onclick="nav('session','${s.id}')" style="color:var(--muted)">${fmtTok(s.in_tokens+s.out_tokens)}</div>
-          <div class="s-cost"  onclick="nav('session','${s.id}')">${s.cost>0?'$'+s.cost.toFixed(4):'—'}</div>
-          <div class="s-date"  onclick="nav('session','${s.id}')">${s.created_at}</div>
-          <button class="del-btn" title="Delete" onclick="deleteSession('${s.id}',this)">✕</button>
-        </div>`).join('')}
-      ${!sessions.length ? '<div class="empty-state">No sessions yet</div>' : ''}
-    </div>`;
+      <div class="s-model" onclick="nav('session','${s.id}')">${esc(s.model||'—')}</div>
+      <div class="s-msgs"  onclick="nav('session','${s.id}')">${s.message_count}</div>
+      <div class="s-msgs"  onclick="nav('session','${s.id}')" style="color:var(--muted)">${fmtTok((s.in_tokens||0)+(s.out_tokens||0))}</div>
+      <div class="s-cost"  onclick="nav('session','${s.id}')">${s.cost>0?'$'+s.cost.toFixed(4):'—'}</div>
+      <div class="s-date"  onclick="nav('session','${s.id}')">${s.created_at}</div>
+      <button class="del-btn" title="Delete" onclick="deleteSession('${s.id}',this)">✕</button>
+    </div>`).join('');
+}
+
+async function renderSessions() {
+  clearInterval(_sessionsRefreshTimer);
+  const sessions = await api('/api/sessions');
+  const mainSess = sessions.filter(s => !s.is_sub);
+  const subSess  = sessions.filter(s =>  s.is_sub);
+  const activeCnt = sessions.filter(s => s.is_active).length;
+  const el = document.getElementById('main');
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div class="section-title" style="margin:0">Sessions — Main (${mainSess.length})</div>
+      ${activeCnt ? `<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--green)"><span class="active-dot"></span>${activeCnt} running</span>` : ''}
+    </div>
+    <div class="panel">${_sessionTableHeader()}${_sessionRows(mainSess)}</div>
+    ${subSess.length ? `
+    <div class="section-title" style="margin-top:18px;cursor:pointer" onclick="toggleSubSessions(this)">
+      Sub-agent Sessions (${subSess.length}) <span id="sub-toggle-hint" style="font-size:11px;color:var(--muted)">▸ expand</span>
+    </div>
+    <div id="sub-sessions-panel" style="display:none">
+      <div class="panel">${_sessionTableHeader()}${_sessionRows(subSess)}</div>
+    </div>` : ''}`;
+  // Auto-refresh every 4s while any session is active
+  if (activeCnt && currentView === 'sessions') {
+    _sessionsRefreshTimer = setInterval(() => {
+      if (currentView === 'sessions') renderSessions();
+      else clearInterval(_sessionsRefreshTimer);
+    }, 4000);
+  }
+}
+function toggleSubSessions(hdr) {
+  const panel = document.getElementById('sub-sessions-panel');
+  if (!panel) return;
+  const open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : '';
+  const hint = document.getElementById('sub-toggle-hint');
+  if (hint) hint.textContent = open ? '▸ expand' : '▾ collapse';
 }
 
 async function deleteSession(id, btn) {
@@ -703,8 +741,8 @@ function renderMessage(msg, idx) {
     const csId  = csStore(text);
     const long  = text.length > 2000;
     content = `
-      <div class="msg-content${long ? ' collapsed' : ''}" id="${elId}" data-cs-id="${csId}" style="font-family:var(--mono);font-size:11px;color:var(--muted)">${esc(text)}</div>
-      ${long ? `<button class="expand-btn" onclick="csToggle('${elId}',this)">expand</button>` : ''}`;
+      <div class="msg-content" id="${elId}" data-cs-id="${csId}" style="font-family:var(--mono);font-size:11px;color:var(--muted)">${esc(text)}</div>
+      ${long ? `<button class="expand-btn" onclick="csToggle('${elId}',this)">collapse</button>` : ''}`;
   }
 
   const roleLabel = role === 'tool' ? `tool result${msg.tool_call_id ? ' · '+msg.tool_call_id.slice(-8) : ''}` : role;

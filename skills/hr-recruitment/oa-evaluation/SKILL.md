@@ -21,12 +21,12 @@ description: 评估候选人在线编程测试（OA）提交，基于内部评�
 
 ## 目录结构约定
 
-所有 OA 评估相关文件保存在 `candidates/{候选人姓名}/OA/` 下：
+所有 OA 评估相关文件保存在 `candidates/{候选人姓名}/OA/` 下。若该目录已存在（如已有出题包），评估文件写入同一目录；若该目录不存在但存在 `OA_2/`、`OA_3/` 等，则对应写入最新的那个（用 `list_files` 确认）：
 
 ```
 candidates/{候选人姓名}/
 ├── profile.json                    # Stage 1 简历数据
-├── OA/
+├── OA/          ← 或 OA_2/、OA_3/ …（与出题包对应的目录）
 │   ├── README.md                   # OA 任务概述（题目、要求、截止时间等）
 │   ├── source_material.md          # 题目详细描述（如有）
 │   ├── INTERNAL_EVALUATION.md      # 内部评价标准（评分维度、权重、扣分规则）

@@ -1,9 +1,0 @@
-{
-  "sub_id": "sub_8d3f702d",
-  "board": "oa-design-meeting",
-  "events": [
-    "pipeline_complete"
-  ],
-  "on_complete_prompt": "OA题目方案设计讨论会已完成。请读取 meeting 的最终结论，检查 design_proposal.md 是否已生成。如果会议成功输出了设计方案，请告知用户设计方案已就绪，可以进入下一步——创建 Kanban pipeline 来生成 OA 题包文件。如果会议失败，请分析原因并告知用户。",
-  "subscribed_at": "2026-06-30T12:05:43"
-}

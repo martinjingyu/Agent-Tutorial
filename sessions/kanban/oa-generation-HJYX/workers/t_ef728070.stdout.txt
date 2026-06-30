@@ -1,4 +1,0 @@
-
-[kanban] Board 'oa-generation-HJYX' complete ¡ª done=13, error=0. Resume your agent to review.
-
-[kanban] Board 'oa-generation-HJYX' complete ¡ª done=13, error=0. Resume your agent to review.

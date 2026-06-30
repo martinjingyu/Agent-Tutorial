@@ -30,12 +30,12 @@ description: 为候选人生成定制化在线编程测试（OA）题包，基�
 
 ## 目录结构约定
 
-所有 OA 题包文件保存在 `candidates/{候选人姓名}/OA_v3/` 下（v3 表示第三版/定制版，基于内部出题标准）：
+所有 OA 题包文件保存在 `candidates/{候选人姓名}/OA/` 下。若该目录已存在，依次尝试 `OA_2/`、`OA_3/` …，使用第一个不存在的名称（用 `list_files` 检查）：
 
 ```
 candidates/{候选人姓名}/
 ├── profile.json                    # Stage 1 简历数据
-├── OA_v3/
+├── OA/          ← 或 OA_2/、OA_3/ …（若前序已存在）
 │   ├── README.md                   # OA 任务概述（题目、要求、截止时间等）
 │   ├── CONTEXT.md                  # 公司背景、情报源描述、业务规则
 │   ├── DELIVERABLES.md             # 提交物清单
@@ -304,6 +304,15 @@ Round 4: 输出最终结论
 - **难度匹配**：题目难度与候选人水平匹配
 - **JD 对齐**：题目覆盖 JD 要求的关键技术点
 
+## 任务完成后的行为（重要）
+
+当 OA 题包生成任务完成（或遇到不可逾越的阻塞）时：
+
+1. **不要空等** — 不要反复 poll Kanban 状态、不要反复读取 worker 日志、不要等待会议 worker 完成
+2. **立即 set timer** — 使用 `kanban_notify_subscribe` 订阅 pipeline_complete 事件，让系统在完成后自动通知
+3. **立即 respond_to_user** — 向用户汇报完成情况（生成了哪些文件、待改进项、下一步建议）
+4. **核心原则**：你是一个 high-level 调度 agent，不是 worker。你的职责是**发起任务、编排依赖、汇报结果**，而不是亲自执行具体工作或空等任务完成。如果任务需要时间，set timer 然后回复用户即可。
+
 ## 题目设计原则
 
 1. **四不准**：不是纯算法题、不是 Prompt 调优题、不依赖特定框架、不限定唯一路线
@@ -329,56 +338,4 @@ Round 4: 输出最终结论
 
 ## 注意事项
 
-1. **题目方案应先设计再生成文件**，确保整体一致性
-2. **Kanban 板用于编排依赖关系**，任务间有依赖时需设置 `depends_on`
-3. **scaffold 代码应包含可运行的测试用例**，方便候选人验证
-4. **SCORING.md 应与 INTERNAL_EVALUATION.md 的维度一致**
-5. **最终审查是必要步骤，不要跳过**
-6. **OA 题包生成是 Stage 2 流程**，应在 Stage 1 筛选通过后进行
-
-7. **会议执行方式的选择**：OA 生成流程中有两种会议场景，执行方式不同：
-
-   **场景 A：OA 题目方案设计讨论会（Step 2 的会议）**
-   - 可以使用 `kanban_create_meeting_task` + `kanban_dispatch` 派发给 worker
-   - 原因：`kanban_create_meeting_task` 创建的 task 预注册了 meeting 工具（`extra_tools: ["meeting"]`），worker 可以正常执行会议
-   - 流程：创建 meeting task → dispatch → 等待完成 → 读取会议结论
-
-   **场景 B：最终审查会议（Step 5 的会议）**
-   - **必须由主 agent 直接调用 meeting 工具**，不能通过 Kanban dispatch
-   - 原因：主 agent 需要在会议中直接修改文件（write_file/patch_file），这是审查闭环的核心
-   - 流程：主 agent 调用 meeting_create_participants → meeting_set_agenda → meeting_chain/meeting_group_discuss → 发现缺陷 → write_file/patch_file 修改 → 再确认 → meeting_conclude
-
-   **通用原则**：如果会议只需要讨论/输出结论（不需要修改文件），可以用 `kanban_create_meeting_task`。如果会议需要主 agent 在执行过程中修改文件，必须由主 agent 直接调用。
-
-8. **内部出题标准缺失时的处理流程**：如果在 workspace 中搜索不到内部 OA 设计标准（如"四不准"、"三必须"等规则），应按以下顺序处理：
-   - ① 检查 skills 和 memory 中是否已有相关规则记录
-   - ② 如果仍找不到，直接询问用户（respond_to_user）获取内部标准，而非自行创建会议讨论
-   - ③ 只有在用户明确要求讨论时才使用 meeting 工具，且必须由主 agent 直接调用（见注意事项 #7）
-   - ④ 将用户提供的内部标准保存到 memory 或 skill 的 references/ 下，供后续 OA 生成复用
-
-9. **Kanban dispatch 的适用性判断**：OA 题包的文件生成任务是否可以通过 `kanban_dispatch` 派发给 worker，取决于 worker 的工具集是否足够：
-   - **可 dispatch 的场景**：任务仅需 `write_file`、`read_file`、`search_files` 等基础工具，且 worker 的 prompt 能正确指导文件生成。此时 dispatch 可并行加速。
-   - **不可 dispatch 的场景**：任务需要浏览器调研、meeting 工具、或 worker 未注册的其他工具。此时应由**主 agent 直接执行**。
-   - **判断方法**：在 dispatch 前检查 `subprocess_worker.py` 中注册的工具列表，确认 worker 具备所需工具。
-   - **回退策略**：如果 dispatch 后大量任务失败（如 8/9 失败），应改为由主 agent 顺序执行（见注意事项 #10）。
-   - **Kanban 板的核心用途**：编排任务依赖关系（通过 `depends_on` 参数），无论由主 agent 还是 worker 执行。
-
-10. **Kanban pipeline 大量失败时的恢复流程**：如果 Kanban pipeline 中大部分任务报错（如 8/9 失败），应按以下顺序处理：
-    - ① 读取失败任务的 worker 日志，分析根因（工具缺失？prompt 错误？worker 崩溃？）
-    - ② 如果根因是 Kanban worker 工具集不足，改为由主 agent 直接执行任务
-    - ③ 如果根因是任务 prompt 设计问题，修正 prompt 后重新创建 pipeline
-    - ④ 如果连续失败且无法定位根因，停止重试，改用主 agent 顺序执行模式（不使用 Kanban）
-    - ⑤ 将根因记录到 memory 或 skill 的 references/ 下，避免重复踩坑
-
-11. **最终审查会议必须包含修改闭环**：Step 5 的审查不是一次性的"审查→给结论"，而是"审查→发现缺陷→修改→再确认"的闭环。主 agent 在会议中既是主持人也是执行者，发现缺陷后应立即使用 write_file/patch_file 修改，然后请专家确认。详见 Step 5.2 的闭环流程。
-
-## 相关 Skills
-
-- `hr-recruitment/oa-evaluation` — 评估候选人 OA 提交（本 skill 的后续步骤）
-- `hr-recruitment/stage1-screening-report` — Stage 1 筛选报告（OA 生成的前置条件）
-- `utilities/windows-file-operations` — Windows 文件操作最佳实践
-- `utilities/context-management` — 上下文管理最佳实践
-
-## 内部参考资料
-
-- `references/oa-design-standards.md` — OA 出题内部标准（四不准与三必须、三段式演进模板、评分维度与权重）
+1. **

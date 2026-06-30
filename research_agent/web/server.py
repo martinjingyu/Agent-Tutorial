@@ -111,13 +111,114 @@ def _usage_by_session() -> dict[str, dict]:
 
 # ── Data readers ──────────────────────────────────────────────────────────
 
+def _session_fingerprint(msgs: list) -> tuple | None:
+    """(msg_count, first_user_content_prefix) — unique enough to match a session."""
+    if not msgs:
+        return None
+    user_msgs = [m for m in msgs if isinstance(m, dict) and m.get("role") == "user"]
+    if not user_msgs:
+        return None
+    first = str(user_msgs[0].get("content") or "")[:300]
+    return (len(msgs), first)
+
+
+def _sub_session_ids() -> set[str]:
+    """Session IDs that belong to kanban sub-agents or meeting participants."""
+    ids: set[str] = set()
+
+    # Kanban worker caches
+    if KANBAN_DIR.exists():
+        for cache_file in KANBAN_DIR.glob("*/workers/*.json"):
+            if ".payload." in cache_file.name:
+                continue
+            try:
+                d = _read_json(cache_file)
+                if isinstance(d, dict) and d.get("session_id"):
+                    ids.add(str(d["session_id"]))
+            except Exception:
+                pass
+
+    # Meeting participant sessions
+    meetings_dir = SESSIONS_DIR / "meetings"
+    if not meetings_dir.exists():
+        return ids
+
+    # Collect participant histories that need fingerprint matching
+    needs_match: list[list] = []
+    for mf in meetings_dir.glob("mtg_*.json"):
+        try:
+            d = _read_json(mf)
+            if not isinstance(d, dict):
+                continue
+            for p in d.get("participants", {}).values():
+                if not isinstance(p, dict):
+                    continue
+                if p.get("session_id"):
+                    # New-style: session_id already stored
+                    ids.add(str(p["session_id"]))
+                elif p.get("session_history"):
+                    # Old-style: need fingerprint match
+                    needs_match.append(p["session_history"])
+        except Exception:
+            pass
+
+    if not needs_match:
+        return ids
+
+    # Build fingerprint → session_id map from all session files
+    fp_map: dict[tuple, str] = {}
+    for sf in SESSIONS_DIR.glob("*.json"):
+        try:
+            msgs = _read_json(sf)
+            if not isinstance(msgs, list):
+                continue
+            fp = _session_fingerprint(msgs)
+            if fp:
+                fp_map[fp] = sf.stem
+        except Exception:
+            pass
+
+    for history in needs_match:
+        fp = _session_fingerprint(history)
+        if fp and fp in fp_map:
+            ids.add(fp_map[fp])
+
+    return ids
+
+
+def _active_session_ids() -> set[str]:
+    """Session IDs that are currently running (web chat or kanban workers)."""
+    ids: set[str] = set()
+    # Web chat sessions running in this server process
+    for sid, data in _chat_sessions.items():
+        if data.get("running"):
+            ids.add(sid)
+    # Kanban workers whose cache reports queued/running
+    if KANBAN_DIR.exists():
+        for cache_file in KANBAN_DIR.glob("*/workers/*.json"):
+            if ".payload." in cache_file.name:
+                continue
+            try:
+                d = _read_json(cache_file)
+                if isinstance(d, dict) and d.get("status") in ("queued", "running") and d.get("session_id"):
+                    ids.add(str(d["session_id"]))
+            except Exception:
+                pass
+    return ids
+
+
 def _list_sessions() -> list[dict]:
+    sub_ids    = _sub_session_ids()
+    active_ids = _active_session_ids()
     sessions = []
     for f in sorted(SESSIONS_DIR.glob("*.json"), reverse=True):
         data = _read_json(f)
         if not isinstance(data, list):
             continue
-        msgs = data
+        # Detect __meta__ sub_agent marker written by new-style agents
+        has_meta = bool(data and isinstance(data[0], dict) and data[0].get("__meta__"))
+        is_sub_by_meta = has_meta and bool(data[0].get("sub_agent"))
+        msgs = data[1:] if has_meta else data
         session_id = f.stem
         model = next((m.get("model") for m in msgs if isinstance(m, dict) and m.get("model")), "")
         created = f.stat().st_mtime
@@ -126,6 +227,8 @@ def _list_sessions() -> list[dict]:
             "created_at":    datetime.fromtimestamp(created).isoformat(timespec="seconds"),
             "message_count": len(msgs),
             "model":         model,
+            "is_sub":        is_sub_by_meta or session_id in sub_ids,
+            "is_active":     session_id in active_ids,
         })
     return sessions
 
@@ -135,7 +238,11 @@ def _session_messages(session_id: str) -> list[dict]:
     if not path.exists():
         return []
     data = _read_json(path)
-    return data if isinstance(data, list) else []
+    if not isinstance(data, list):
+        return []
+    if data and isinstance(data[0], dict) and data[0].get("__meta__"):
+        return data[1:]
+    return data
 
 
 def _list_boards() -> list[dict]:

@@ -118,6 +118,7 @@ class GeneralAgent:
         candidate_folder: str | Path | None = None,
         session_path: str | Path | None = None,
         session_id: str | None = None,
+        sub_agent: bool = False,
     ) -> None:
         ensure_project_dirs()
         load_builtin_tools()
@@ -128,6 +129,7 @@ class GeneralAgent:
         self.self_review_enabled = self_review
         self.ui = ui or ConsoleUI(enabled=True)
         self.session_id = session_id or new_session_id()
+        self._sub_agent = sub_agent
         self.task_id = f"task_{uuid.uuid4().hex[:8]}"
         self._spill_dir = SESSIONS_DIR / ".tool_cache" / self.session_id
         self._spill_counter = 0
@@ -490,7 +492,7 @@ class GeneralAgent:
             self.ui.final()
 
         messages = self._repair_tool_sequences(messages)
-        default_session_path = save_session(self.session_id, messages)
+        default_session_path = save_session(self.session_id, messages, sub_agent=self._sub_agent)
         if self._session_path:
             self._session_path.parent.mkdir(parents=True, exist_ok=True)
             self._session_path.write_text(

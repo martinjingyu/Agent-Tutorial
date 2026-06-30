@@ -119,14 +119,17 @@ def _run_participant(
         self_review=False,
         registry=participant_registry,
         ui=ConsoleUI(enabled=False, label=participant["name"]),
+        sub_agent=True,
     )
     result = agent.run(
         prompt,
         history=participant.get("session_history") or [],
         system_prompt=participant.get("system_prompt"),
     )
-    # Persist updated session history back to participant record
+    # Persist updated session history and session_id back to participant record
     participant["session_history"] = result["messages"]
+    if result.get("session_id"):
+        participant["session_id"] = result["session_id"]
     return result.get("final") or ""
 
 

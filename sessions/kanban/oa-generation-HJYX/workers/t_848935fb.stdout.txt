@@ -1,1 +1,0 @@
-[kanban auto-advance] board=oa-generation-HJYX spawned=11

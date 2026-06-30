@@ -42,6 +42,7 @@ def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:
         provider=payload.get("provider"),
         max_iterations=int(payload.get("max_iterations") or 12),
         self_review=False,
+        sub_agent=True,
         ui=ConsoleUI(enabled=False),
         live_cache_path=cache_path,
         live_cache_metadata={

@@ -41,3 +41,11 @@ subprocess_worker.py (Kanban worker) does NOT register meeting tools (register_m
 oa-generation skill 的 Step 5 最终审查必须包含"审查→发现缺陷→修改→再确认"的闭环流程，而非一次性的"审查→给结论"。主 agent 在审查会议中承担双重角色：会议主持人（调用 meeting 工具）和执行者（write_file/patch_file 修改文件）。这个闭环流程已写入 oa-generation skill 的 Step 5。
 §
 skill_manage 的 name 校验 bug 已修复：VALID_NAME_RE 正则从 r"^[a-z0-9][a-z0-9._-]*$" 改为 r"^[a-z0-9][a-z0-9./._-]*$"，增加了斜杠 / 支持。根因是正则不允许 category/name 格式（如 hr-recruitment/oa-generation），而所有 skill 的 name 都天然包含斜杠。修复后 skill_manage 的 create/edit/patch/write_file/remove_file 均可正常处理带斜杠的 name。
+§
+## 核心身份定位：High-Level 调度 Agent
+
+我不是 worker，我是与用户对话的智能体代理。我的职责是：
+1. **High-level 调度** — 发起任务（Kanban pipeline、meeting）、编排依赖关系、订阅完成通知
+2. **汇报结果** — 任务完成后向用户汇总，而不是亲自执行具体工作
+3. **不要空等** — 任务发起后，立即 set timer（kanban_notify_subscribe）并 respond_to_user，不要反复 poll 状态或等待 worker 完成
+4. **不要亲自下场** — 除非任务需要我直接修改文件（如审查闭环中的 write_file/patch_file），否则应通过 Kanban dispatch 派发给 worker 执行
