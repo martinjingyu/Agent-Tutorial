@@ -181,10 +181,18 @@ def _chat_completion_like(content: str | None, tool_calls: list[SimpleNamespace]
     return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
+# Models that should be silently upgraded to deepseek-v4-flash
+_DEEPSEEK_LEGACY_ALIASES = {"deepseek-chat", "deepseek-v3", "deepseek-v3-0324"}
+
+
 class LLMClient:
     def __init__(self, model: str | None = None, provider: str | None = None):
         self.provider = _provider(provider)
-        self.model = model or _default_model(self.provider)
+        raw = model or _default_model(self.provider)
+        # Upgrade legacy deepseek aliases → v4-flash
+        if self.provider == "deepseek" and raw in _DEEPSEEK_LEGACY_ALIASES:
+            raw = "deepseek-v4-flash"
+        self.model = raw
         self._codex_token: str | None = None
         self._client: OpenAI | None = None
 
@@ -207,11 +215,26 @@ class LLMClient:
             return OpenAI(
                 api_key=get_env("DEEPSEEK_API_KEY"),
                 base_url=get_env("DEEPSEEK_BASE_URL", DEEPSEEK_BASE_URL),
+                timeout=120.0,
+                max_retries=0,
             )
         return OpenAI(
             api_key=get_env("OPENAI_API_KEY"),
             base_url=get_env("OPENAI_BASE_URL") or None,
+            timeout=120.0,
+            max_retries=0,
         )
+
+    @staticmethod
+    def _is_transient(exc: Exception) -> bool:
+        """True for timeout / connection / 5xx errors that are worth retrying."""
+        name = type(exc).__name__
+        if any(k in name for k in ("Timeout", "Connection", "ServiceUnavailable")):
+            return True
+        status = getattr(exc, "status_code", None) or getattr(
+            getattr(exc, "response", None), "status_code", None
+        )
+        return status in (429, 500, 502, 503, 504)
 
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Any:
         if self.provider == "codex":
@@ -228,7 +251,18 @@ class LLMClient:
             extra_body = _deepseek_extra_body()
             if extra_body:
                 kwargs["extra_body"] = extra_body
-        return self._client_or_create().chat.completions.create(**kwargs)
+
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                return self._client_or_create().chat.completions.create(**kwargs)
+            except Exception as exc:
+                if attempt < max_retries and self._is_transient(exc):
+                    wait = 5 * (attempt + 1)
+                    print(f"[LLM] transient error ({type(exc).__name__}), retry {attempt+1}/{max_retries} in {wait}s…", flush=True)
+                    time.sleep(wait)
+                else:
+                    raise
 
     def complete_text(self, prompt: str, *, temperature: float = 0.2) -> str:
         if self.provider == "codex":

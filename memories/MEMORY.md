@@ -49,3 +49,27 @@ skill_manage 的 name 校验 bug 已修复：VALID_NAME_RE 正则从 r"^[a-z0-9]
 2. **汇报结果** — 任务完成后向用户汇总，而不是亲自执行具体工作
 3. **不要空等** — 任务发起后，立即 set timer（kanban_notify_subscribe）并 respond_to_user，不要反复 poll 状态或等待 worker 完成
 4. **不要亲自下场** — 除非任务需要我直接修改文件（如审查闭环中的 write_file/patch_file），否则应通过 Kanban dispatch 派发给 worker 执行
+§
+Skill 'hr-recruitment/oa-generation' was not found when a Kanban worker tried to load it for task '生成 SCORING.md'. The skill may need to be created or the skill name may be incorrect.
+§
+Skill 'hr-recruitment/oa-generation' was not found when a Kanban worker tried to load it for task '生成 SCORING.md' on board oa-generation-TianzeXia-v2. The worker proceeded autonomously using the task prompt and existing OA design files (design_conclusion.md, README.md, DELIVERABLES.md). The skill may need to be created or the skill name may be incorrect.
+§
+Skill 'hr-recruitment/oa-generation' was not found when a Kanban worker tried to load it for task '生成 scaffold/ 代码框架'. The worker proceeded autonomously using the task prompt and design_conclusion.md as guidance.
+§
+OA题目方案「跨境合规情报融合引擎」已设计完成，保存在 reports/OA题目方案_Agent架构师视角.md。核心设计思路：让候选人设计一个 Agent Pipeline 来控制 LLM 的三大缺陷（幻觉、格式漂移、信息冲突），而非写算法或调 Prompt。输入包含 5 种异构源 + 9 种噪声类型，输出有明确的 JSON schema 要求，40% 分值压在 Pipeline 设计直觉上。
+§
+## Ctrl-Agent Paper Idea (2026-07-01)
+
+**Core idea**: Bridge Ctrl-R (structured reasoning trajectory control, NeurIPS 2026 Spotlight) with Lumos-style agent tool-use (planning→grounding→execution). 
+
+**Key insight**: No existing work uses structured trajectory control (backtracking, backward chaining, counterfactual exploration, importance-sampled RL) to improve agent planning/grounding/execution in multi-tool environments.
+
+**5 agentic reasoning patterns**: Backtracking, Backward Chaining, Induction, Counterfactual, Recovery.
+
+**Technical approach**: Trajectory Controller (orchestrator) + Agentic GRPO (tool-call rewards) + Magnet-inspired seed data + Self-evolving exploration strategy.
+
+**Jingyu's strengths map**: Multi-agent orchestration → Trajectory Controller; Context management → structured trajectory state graph; RL post-training (GRPO) → Agentic GRPO; Guardian-Worker → Controller-Worker architecture.
+
+**Target venue**: NeurIPS 2027 or ICLR 2027 (methods paper). ACL 2027 as alternative (NLP/agent framing).
+
+**Full report**: reports/novel_paper_idea_ctrlR_agent_tool_use.md

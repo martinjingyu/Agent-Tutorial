@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from .tools.memory import memory_snapshot
 
 
@@ -71,7 +73,8 @@ If nothing durable should be saved, answer exactly: Nothing to save.
 
 
 def build_system_prompt(skills_index: str = "") -> str:
-    parts = [BASE_SYSTEM_PROMPT.strip()]
+    today = datetime.now().strftime("%Y-%m-%d")
+    parts = [f"Current date: {today}", BASE_SYSTEM_PROMPT.strip()]
     mem = memory_snapshot()
     if mem:
         parts.append("Persistent memory snapshot:\n" + mem)

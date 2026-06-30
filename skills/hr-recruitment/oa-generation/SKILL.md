@@ -107,9 +107,13 @@ candidates/{候选人姓名}/
 
 #### 3.1 先召开 OA 题目方案设计讨论会
 
-在创建文件生成 pipeline 之前，**必须先召开设计讨论会**，确定题目方案。有两种方式：
+在创建文件生成 pipeline 之前，**必须先召开设计讨论会**，确定题目方案。**选择以下一种方式，不可两种混用**：
+
+> ⚠️ **严禁混用**：选了方式 A 就不要再调用 `meeting_create_participants`；选了方式 B 就不要再创建 Kanban meeting task。两种方式都执行会产生两个重复 meeting。
 
 **方式 A（推荐）：使用 `kanban_create_meeting_task`**
+
+由 worker 代替主 agent 召开会议。主 agent **不需要也不应该**直接调用任何 `meeting_*` 工具。
 ```python
 kanban_create_meeting_task(
     board="oa-design-{候选人姓名}",
@@ -140,10 +144,11 @@ kanban_create_meeting_task(
                            "王工：Agent系统架构师，擅长多智能体系统、Pipeline设计"]
 )
 ```
-然后 dispatch 等待完成，读取会议结论。
+然后 dispatch 等待完成，读取会议结论。**dispatch 完成后直接读结论，无需再做任何 meeting 操作。**
 
 **方式 B：主 agent 直接调用 meeting 工具**
-如果会议比较简单，主 agent 可以直接调用 meeting 工具：
+
+如果会议比较简单，主 agent 可以直接调用 meeting 工具（**此时不要创建 kanban meeting task**）：
 ```python
 meeting_create_participants(...)
 meeting_set_agenda(...)

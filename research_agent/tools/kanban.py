@@ -168,7 +168,25 @@ def _parents_done(tasks: dict[str, dict[str, Any]], task: dict[str, Any]) -> boo
     return True
 
 
+WORKER_TIMEOUT_SECONDS = 2700  # 45 min hard kill: 120s LLM timeout × 16 iter × 1.4 buffer
+
+
+def _kill_pid(pid: int) -> None:
+    try:
+        import signal
+        os.kill(pid, signal.SIGTERM if os.name != "nt" else signal.SIGTERM)
+    except Exception:
+        try:
+            import ctypes
+            ctypes.windll.kernel32.TerminateProcess(
+                ctypes.windll.kernel32.OpenProcess(1, False, pid), 1
+            )
+        except Exception:
+            pass
+
+
 def _sync_running(data: dict[str, Any]) -> list[dict[str, Any]]:
+    from datetime import datetime as _dt
     updates: list[dict[str, Any]] = []
     for task in data.get("tasks", {}).values():
         if task.get("status") != "running":
@@ -197,6 +215,24 @@ def _sync_running(data: dict[str, Any]) -> list[dict[str, Any]]:
             task["error"] = cached.get("error", "worker error")
             updates.append({"task_id": task["id"], "status": "error", "error": task["error"]})
             _event(data, "task_error", task_id=task["id"], error=task["error"])
+        else:
+            # Check for hung worker: started_at too long ago → kill and mark error
+            started = task.get("started_at") or cached.get("started_at")
+            if started:
+                try:
+                    elapsed = (_dt.now() - _dt.fromisoformat(started)).total_seconds()
+                    if elapsed > WORKER_TIMEOUT_SECONDS:
+                        pid = task.get("pid") or cached.get("pid")
+                        if pid:
+                            _kill_pid(int(pid))
+                        err = f"worker timeout after {int(elapsed)}s"
+                        task["status"] = "error"
+                        task["completed_at"] = _now()
+                        task["error"] = err
+                        updates.append({"task_id": task["id"], "status": "error", "error": err})
+                        _event(data, "task_error", task_id=task["id"], error=err)
+                except Exception:
+                    pass
     return updates
 
 
@@ -782,6 +818,7 @@ def _handle_notify_subscribe(args: dict, runtime: dict) -> str:
         "board":             board_name,
         "events":            events,
         "on_complete_prompt": on_complete_prompt,
+        "session_id":        runtime.get("session_id", ""),
         "subscribed_at":     _now(),
     }
     NOTIFY_DIR.mkdir(parents=True, exist_ok=True)
@@ -837,9 +874,23 @@ def fire_notifications(board_name: str, data: dict[str, Any]) -> None:
         }
         pending_path = NOTIFY_DIR / f"{board_name}_pending_{sub['sub_id']}.json"
         pending_path.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # Write wake file so the web server can auto-resume the session
+        session_id = sub.get("session_id", "")
+        if session_id:
+            wake = {
+                "session_id":        session_id,
+                "board":             board_name,
+                "pending_file":      str(pending_path),
+                "on_complete_prompt": sub.get("on_complete_prompt") or "",
+                "fired_at":          _now(),
+            }
+            (NOTIFY_DIR / f"wake_{session_id}_{sub['sub_id']}.json").write_text(
+                json.dumps(wake, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
         sub_file.unlink(missing_ok=True)
 
-        # Also print a one-liner so the user knows to resume the agent
         sys.stdout.write(
             f"\n[kanban] Board '{board_name}' complete — "
             f"done={n_done}, error={n_error}. Resume your agent to review.\n"

@@ -410,6 +410,89 @@ class _WebStreamUI:
 # {session_id: {"history": [...], "q": SimpleQueue, "running": bool}}
 _chat_sessions: dict[str, dict] = {}
 
+# Recently auto-resumed session IDs (broadcast via global SSE, cleared after read)
+_recently_resumed: list[str] = []
+_recently_resumed_lock = threading.Lock()
+
+NOTIFY_DIR = SESSIONS_DIR / "kanban" / "subscriptions"
+
+
+def _auto_resume_session(session_id: str, wake: dict) -> None:
+    """Auto-resume an idle session when a kanban board completes."""
+    sess = _chat_sessions.get(session_id)
+    if sess and sess.get("running"):
+        return  # already running
+
+    # Consume the pending notification content
+    try:
+        from ..tools.kanban import consume_pending_notifications
+        pending_msgs = consume_pending_notifications()
+    except Exception:
+        pending_msgs = []
+
+    if not pending_msgs:
+        board = wake.get("board", "?")
+        extra = wake.get("on_complete_prompt", "")
+        content = f"[kanban notification] Board '{board}' pipeline_complete."
+        if extra:
+            content += f"\n\nRequested follow-up: {extra}"
+        pending_msgs = [{"role": "user", "content": content}]
+
+    trigger_message = "\n\n".join(m["content"] for m in pending_msgs)
+
+    # Load saved session history
+    history = _session_messages(session_id)
+
+    q: "queue.SimpleQueue[dict]" = queue.SimpleQueue()
+    _chat_sessions[session_id] = {"history": history, "q": q, "running": True}
+
+    def _run() -> None:
+        try:
+            from ..agent import GeneralAgent
+            ui = _WebStreamUI(q)
+            agent = GeneralAgent(
+                max_iterations=30,
+                self_review=False,
+                ui=ui,
+                session_id=session_id,
+            )
+            result = agent.run(trigger_message, history=history)
+            _chat_sessions[session_id]["history"] = result.get("messages", [])
+            q.put({"type": "done", "final": result.get("final", "")})
+        except Exception as exc:
+            q.put({"type": "error", "error": str(exc)})
+        finally:
+            _chat_sessions[session_id]["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    with _recently_resumed_lock:
+        if session_id not in _recently_resumed:
+            _recently_resumed.append(session_id)
+
+
+def _notification_watcher() -> None:
+    """Background thread: watches for kanban wake files and auto-resumes sessions."""
+    while True:
+        try:
+            if NOTIFY_DIR.exists():
+                for wake_file in sorted(NOTIFY_DIR.glob("wake_*.json")):
+                    try:
+                        wake = json.loads(wake_file.read_text(encoding="utf-8"))
+                        sid = wake.get("session_id", "")
+                        if sid:
+                            _auto_resume_session(sid, wake)
+                        wake_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        time.sleep(2)
+
+
+# Start background watcher
+threading.Thread(target=_notification_watcher, daemon=True).start()
+
 
 # ── API routes ────────────────────────────────────────────────────────────
 
@@ -436,6 +519,8 @@ async def overview() -> dict:
         "recent_sessions":    sessions[:8],
         "active_boards":      [b for b in boards if b["has_active"]],
         "open_meetings":      [m for m in meetings if not m["closed_at"]],
+        "active_talks":       [s for s in sessions if s["is_active"] and not s["is_sub"]],
+        "main_sessions":      [s for s in sessions if not s["is_sub"]],
     }
 
 
@@ -542,6 +627,15 @@ async def costs() -> dict:
 
 # ── Chat ──────────────────────────────────────────────────────────────────
 
+@app.delete("/api/chat/{session_id}/lock")
+async def force_unlock_session(session_id: str) -> dict:
+    """Force-clear the 'running' flag for a stuck session."""
+    sess = _chat_sessions.get(session_id)
+    if sess:
+        sess["running"] = False
+    return {"ok": True, "session_id": session_id}
+
+
 @app.post("/api/chat")
 async def chat_send(body: dict) -> dict:
     sid     = body.get("session_id") or new_session_id()
@@ -635,11 +729,15 @@ async def sse_events() -> StreamingResponse:
                         d = _board_detail(b["name"])
                         if d:
                             active_board_details.append(d)
+                with _recently_resumed_lock:
+                    resumed = list(_recently_resumed)
+                    _recently_resumed.clear()
                 data = {
-                    "boards":   active_board_details,
-                    "meetings": [_meeting_detail(m["meeting_id"]) for m in meetings
-                                 if not m["closed_at"] and m["meeting_id"]],
-                    "cost":     costs["total_cost"],
+                    "boards":           active_board_details,
+                    "meetings":         [_meeting_detail(m["meeting_id"]) for m in meetings
+                                         if not m["closed_at"] and m["meeting_id"]],
+                    "cost":             costs["total_cost"],
+                    "resumed_sessions": resumed,
                 }
                 yield f"data: {json.dumps(data)}\n\n"
             except Exception:

@@ -267,12 +267,14 @@ body {
   <div id="sidebar">
     <div class="nav-section">Views</div>
     <div class="nav-item active" data-view="overview" onclick="nav('overview')"><span class="nav-icon">◉</span> Overview</div>
-    <div class="nav-item" data-view="chat"     onclick="nav('chat')"><span class="nav-icon">✦</span> New Chat</div>
+    <div class="nav-item" data-view="chat"     onclick="startNewTalk()"><span class="nav-icon">✦</span> New Chat</div>
     <div class="nav-item" data-view="sessions" onclick="nav('sessions')"><span class="nav-icon">◈</span> Sessions</div>
     <div class="nav-item" data-view="kanban"   onclick="nav('kanban')"><span class="nav-icon">⊞</span> Kanban</div>
     <div class="nav-item" data-view="meetings" onclick="nav('meetings')"><span class="nav-icon">◎</span> Meetings</div>
     <div class="nav-item" data-view="costs"    onclick="nav('costs')"><span class="nav-icon">◇</span> Costs</div>
 
+    <div class="nav-section" id="talks-section" style="display:none">Talks</div>
+    <div id="talks-nav"></div>
     <div class="nav-section" id="active-boards-section" style="display:none">Active Boards</div>
     <div id="active-boards-nav"></div>
     <div class="nav-section" id="open-meetings-section" style="display:none">Open Meetings</div>
@@ -327,12 +329,12 @@ function nav(view, params) {
 
 function renderView(view, params) {
   const main = document.getElementById('main');
-  if (view !== 'chat') main.style.padding = '18px 20px';
-  else main.style.padding = '0';
+  if (view === 'chat') main.style.padding = '0';
+  else main.style.padding = '18px 20px';
   main.innerHTML = '<div class="loading">Loading…</div>';
   switch (view) {
     case 'overview':  renderOverview();          break;
-    case 'chat':      renderChat();              break;
+    case 'chat':      renderChat(params);        break;
     case 'sessions':  renderSessions();          break;
     case 'session':   renderSession(params);     break;
     case 'kanban':    renderKanbanList();         break;
@@ -428,6 +430,17 @@ function newChat() {
   renderChat();
 }
 
+function openTalk(sid) {
+  _chatSessionId = sid;
+  nav('chat', sid);
+}
+
+function startNewTalk() {
+  _chatSessionId = null;
+  if (_chatSSE) { _chatSSE.close(); _chatSSE = null; }
+  nav('chat');
+}
+
 async function loadChatHistory(sid) {
   try {
     const data = await api(`/api/sessions/${sid}`);
@@ -493,8 +506,26 @@ async function chatSend() {
       _chatFinish(); _chatSSE.close();
     };
   } catch(err) {
-    _streamSysMsg('⚠ ' + err.message);
+    if (err.message === 'HTTP 409' && _chatSessionId) {
+      const sid = _chatSessionId;
+      _streamSysMsg(
+        `⚠ Session busy — another run is still active. ` +
+        `<button onclick="forceStopSession('${sid}',this)" style="margin-left:6px">Force Stop</button>`
+      );
+    } else {
+      _streamSysMsg('⚠ ' + err.message);
+    }
     _chatFinish();
+  }
+}
+
+async function forceStopSession(sid, btn) {
+  btn.disabled = true; btn.textContent = 'Stopping…';
+  try {
+    await apiFetch(`/api/chat/${sid}/lock`, {method:'DELETE'});
+    btn.textContent = 'Stopped — you can send again';
+  } catch(e) {
+    btn.textContent = 'Failed: ' + e.message;
   }
 }
 
@@ -956,11 +987,19 @@ function updateTopbar(data) {
   setText('tb-cost', `$${(data.total_cost||0).toFixed(4)}`);
 }
 function updateSidebarLive(data) {
-  const ab = data.active_boards||[], om = data.open_meetings||[];
+  const talks = data.main_sessions||[], ab = data.active_boards||[], om = data.open_meetings||[];
+  const ts = document.getElementById('talks-section');
+  const tn = document.getElementById('talks-nav');
   const bs = document.getElementById('active-boards-section');
   const bn = document.getElementById('active-boards-nav');
   const ms = document.getElementById('open-meetings-section');
   const mn = document.getElementById('open-meetings-nav');
+  ts.style.display = talks.length ? '' : 'none';
+  tn.innerHTML = talks.map(s=>`
+    <div class="nav-item" onclick="openTalk('${s.id}')">
+      ${s.is_active ? '<span class="active-dot" style="margin-right:4px;flex-shrink:0"></span>' : '<span class="nav-icon">✦</span>'}
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.id)}</span>
+    </div>`).join('');
   bs.style.display = ab.length ? '' : 'none';
   bn.innerHTML = ab.map(b=>`<div class="nav-item" onclick="nav('board','${b.name}')"><span class="nav-icon">⊞</span>${esc(b.name)}<span class="badge">${(b.status_counts||{}).running||0}</span></div>`).join('');
   ms.style.display = om.length ? '' : 'none';
@@ -972,9 +1011,39 @@ function startSSE() {
   const es = new EventSource('/api/events');
   es.onmessage = (e) => {
     document.getElementById('live-time').textContent = new Date().toLocaleTimeString();
+    try {
+      const ev = JSON.parse(e.data);
+      // Auto-resume: if our current chat session just got triggered by a kanban notification
+      if (ev.resumed_sessions && ev.resumed_sessions.includes(_chatSessionId) && currentView === 'chat') {
+        _attachChatStream(_chatSessionId);
+      }
+    } catch {}
     api('/api/overview').then(data => { updateTopbar(data); updateSidebarLive(data); }).catch(()=>{});
   };
   es.onerror = () => { document.getElementById('live-dot').style.background = 'var(--red)'; };
+}
+
+function _attachChatStream(sid) {
+  if (_chatRunning) return;
+  _chatRunning = true;
+  const sendBtn = document.getElementById('chat-send');
+  if (sendBtn) sendBtn.disabled = true;
+
+  const logEl = document.createElement('div');
+  logEl.className = 'stream-log';
+  const chatMsgs = document.getElementById('chat-messages');
+  if (chatMsgs) { chatMsgs.appendChild(logEl); scrollChat(); }
+  _streamLog     = logEl;
+  _currentToolEl = null;
+  _toolStartMs   = 0;
+
+  if (_chatSSE) _chatSSE.close();
+  _chatSSE = new EventSource(`/api/chat/${sid}/stream`);
+  _chatSSE.onmessage = (e) => { try { handleChatEvent(JSON.parse(e.data)); } catch {} };
+  _chatSSE.onerror = () => {
+    _streamSysMsg('⚠ connection lost');
+    _chatFinish(); _chatSSE.close();
+  };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

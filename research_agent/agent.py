@@ -19,6 +19,15 @@ from .tools.registry import ToolRegistry
 from .ui import ConsoleUI
 
 
+def _consume_notifications() -> list[dict]:
+    """Safely consume pending kanban notifications (no-op if kanban not loaded)."""
+    try:
+        from .tools.kanban import consume_pending_notifications
+        return consume_pending_notifications()
+    except Exception:
+        return []
+
+
 COMPACT_AFTER_FINAL_TOOL_COUNT = 8
 """If the number of tool results after the last final_response exceeds this,
 the agent will compact before executing the next batch of tool calls."""
@@ -286,6 +295,13 @@ class GeneralAgent:
         history: list[dict[str, Any]] | None = None,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
+        # Consume any pending kanban notifications and prepend to current message
+        # so the agent wakes up aware of board completion without a second user turn.
+        pending = _consume_notifications()
+        if pending:
+            notif_text = "\n\n".join(m["content"] for m in pending)
+            user_message = f"{notif_text}\n\n---\n{user_message}" if user_message.strip() else notif_text
+
         messages = self._repair_tool_sequences(list(history or []))
         system_prompt = system_prompt or build_system_prompt(self._skills_index())
 
