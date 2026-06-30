@@ -3,14 +3,21 @@
 These tools are NOT in the default registry.  Call register_meeting_tools() to opt in.
 
 Architecture:
-  - Moderator: a GeneralAgent with meeting tools (but no kanban tools)
-  - Participants: full GeneralAgents with their own tool loops and session histories,
-                  but without kanban_* and meeting_* tools
-  - Each participant's internal tool calls are invisible to others;
-    only their respond_to_user final text is shared
+  - Moderator: a GeneralAgent with meeting tools
+  - Participants: lightweight GeneralAgents, always start FRESH each turn (no session_history),
+                  receive all relevant context (agenda + notes + prior responses) in the user
+                  message, and are restricted to respond_to_user (no file writing, no spawning)
+  - group_discuss runs participants in parallel via ThreadPoolExecutor
+
+Context design:
+  - Each participant turn builds a single user message:
+      [Meeting Agenda] [Moderator Notes] [Discussion So Far] [Your Turn]
+  - "Discussion So Far" = all prior responses (by speaker + content), with round markers
+  - Participants never see raw tool calls or internal agent loops from others
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import uuid
 from datetime import datetime
@@ -22,7 +29,8 @@ from .registry import ToolRegistry, json_result, registry
 
 MEETINGS_DIR = SESSIONS_DIR / "meetings"
 
-# Tool names excluded from participant registries
+# ── Tool exclusion sets ───────────────────────────────────────────────────────
+
 _MEETING_TOOL_NAMES = {
     "meeting_create_participants",
     "meeting_set_agenda",
@@ -35,11 +43,20 @@ _MEETING_TOOL_NAMES = {
 _KANBAN_TOOL_NAMES = {
     "kanban_create_task", "kanban_list_tasks", "kanban_update_task",
     "kanban_dispatch", "kanban_notify_subscribe", "kanban_wait_complete",
+    "kanban_create_pipeline", "kanban_create_meeting_task",
 }
-_PARTICIPANT_EXCLUDED = _MEETING_TOOL_NAMES | _KANBAN_TOOL_NAMES
+# Participants must NOT write files, run shell, spawn sub-agents, or touch memory/kanban
+_PARTICIPANT_WRITE_TOOLS = {
+    "write_file", "patch_file",
+    "terminal", "run_cmd",
+    "plan_subagent", "plan_subllm",
+    "memory",
+    "request_restart",
+}
+_PARTICIPANT_EXCLUDED = _MEETING_TOOL_NAMES | _KANBAN_TOOL_NAMES | _PARTICIPANT_WRITE_TOOLS
 
 
-# ── Meeting state helpers ─────────────────────────────────────────────────
+# ── Meeting state helpers ─────────────────────────────────────────────────────
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -50,8 +67,7 @@ def _slugify(text: str, max_len: int = 40) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"[\s_]+", "-", text)
-    text = text.strip("-")
-    return text[:max_len].rstrip("-")
+    return text.strip("-")[:max_len].rstrip("-")
 
 
 def _meeting_path(meeting_id: str) -> Path:
@@ -80,60 +96,106 @@ def _meeting_id(runtime: dict) -> str:
     return mid
 
 
-def _append_transcript(data: dict, speaker: str, content: str) -> None:
-    data["transcript"].append({
-        "speaker": speaker,
-        "content": content,
-        "timestamp": _now(),
-    })
+def _append_transcript(data: dict, speaker: str, content: str, round_num: int | None = None) -> None:
+    entry: dict[str, Any] = {"speaker": speaker, "content": content, "timestamp": _now()}
+    if round_num is not None:
+        entry["round"] = round_num
+    data["transcript"].append(entry)
 
 
-# ── Participant agent runner ──────────────────────────────────────────────
+# ── Context builder ───────────────────────────────────────────────────────────
+
+def _build_participant_message(
+    data: dict[str, Any],
+    speaker_name: str,
+    question: str,
+    discussion_history: list[dict[str, Any]],
+) -> str:
+    """Build the full user message for a participant's agent turn.
+
+    Includes meeting agenda, moderator notes, all prior responses with round markers,
+    and a clear 'your turn' prompt. Participants must respond via respond_to_user only.
+    """
+    parts: list[str] = []
+
+    if data.get("agenda"):
+        parts.append(f"=== Meeting Agenda ===\n{data['agenda']}")
+
+    if data.get("notes"):
+        parts.append(f"=== Moderator Notes ===\n{data['notes']}")
+
+    if discussion_history:
+        lines: list[str] = ["=== Discussion So Far ==="]
+        current_round: int | None = None
+        for entry in discussion_history:
+            r = entry.get("round")
+            if r is not None and r != current_round:
+                current_round = r
+                lines.append(f"\n[Round {r}]")
+            lines.append(f"{entry['speaker']}: {entry['content']}")
+        parts.append("\n".join(lines))
+
+    parts.append(
+        f"=== Your Turn ({speaker_name}) ===\n{question}\n\n"
+        "Respond with your analysis and conclusions via respond_to_user. "
+        "Do not write or create files — your output is your spoken response only."
+    )
+
+    return "\n\n".join(parts)
+
+
+# ── Participant runner ────────────────────────────────────────────────────────
 
 def _run_participant(
     participant: dict[str, Any],
-    question: str,
-    shared_context: str = "",
+    user_message: str,
 ) -> str:
-    """Run one participant's agent loop and return their final response.
+    """Run one participant agent and return their respond_to_user output.
 
-    shared_context is prepended as context from the meeting (e.g. previous
-    responses in a chain) and is NOT added to the participant's own history —
-    it is passed as part of the user message so the participant can reference
-    it but it doesn't pollute their internal session.
+    History management:
+      - participant["session_history"] holds CLEAN input/output pairs only:
+          [{role:user, content:<round N context>}, {role:assistant, content:<final response>}, ...]
+      - After each run, we append only the user message + final response (no tool calls).
+      - This keeps the participant's context window coherent across rounds without noise.
+
+    Restricted registry: no file writing, no shell, no spawning.
     """
     from ..agent import GeneralAgent
     from ..ui import ConsoleUI
 
-    # Build participant-specific registry (exclude meeting + kanban tools)
     participant_registry: ToolRegistry = registry.without(_PARTICIPANT_EXCLUDED)
 
-    prompt = question
-    if shared_context:
-        prompt = f"{shared_context}\n\n---\n{question}"
+    # session_history contains only clean user/assistant pairs from prior rounds
+    history = participant.get("session_history") or []
 
     agent = GeneralAgent(
         model=participant.get("model"),
         provider=participant.get("provider"),
-        max_iterations=participant.get("max_iterations", 12),
+        max_iterations=int(participant.get("max_iterations") or 8),
         self_review=False,
         registry=participant_registry,
         ui=ConsoleUI(enabled=False, label=participant["name"]),
         sub_agent=True,
     )
     result = agent.run(
-        prompt,
-        history=participant.get("session_history") or [],
+        user_message,
+        history=history,
         system_prompt=participant.get("system_prompt"),
     )
-    # Persist updated session history and session_id back to participant record
-    participant["session_history"] = result["messages"]
+    final = result.get("final") or ""
+
+    # Append ONLY the clean input/output pair — no intermediate tool calls
+    participant["session_history"] = history + [
+        {"role": "user",      "content": user_message},
+        {"role": "assistant", "content": final},
+    ]
     if result.get("session_id"):
         participant["session_id"] = result["session_id"]
-    return result.get("final") or ""
+
+    return final
 
 
-# ── Tool handlers ─────────────────────────────────────────────────────────
+# ── Tool handlers ─────────────────────────────────────────────────────────────
 
 def _handle_create_participants(args: dict, runtime: dict) -> str:
     participants_cfg = args.get("participants") or []
@@ -146,10 +208,10 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
 
     data: dict[str, Any] = {
         "meeting_id": meeting_id,
-        "name": default_name,
+        "name":       default_name,
         "created_at": _now(),
-        "agenda": "",
-        "notes": "",
+        "agenda":     "",
+        "notes":      "",
         "conclusion": "",
         "transcript": [],
         "participants": {},
@@ -158,7 +220,7 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
         name = str(cfg.get("name") or "").strip()
         if not name:
             continue
-        role   = str(cfg.get("role") or "").strip()
+        role   = str(cfg.get("role")   or "").strip()
         skills = str(cfg.get("skills") or "").strip()
         system_prompt = (
             f"You are {name}."
@@ -166,13 +228,13 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
             + (f"\n\nSkills and knowledge:\n{skills}" if skills else "")
         )
         data["participants"][name] = {
-            "name":            name,
-            "role":            role,
-            "system_prompt":   cfg.get("system_prompt") or system_prompt,
-            "model":           cfg.get("model"),
-            "provider":        cfg.get("provider"),
-            "max_iterations":  int(cfg.get("max_iterations") or 12),
-            "session_history": [],
+            "name":           name,
+            "role":           role,
+            "system_prompt":  cfg.get("system_prompt") or system_prompt,
+            "model":          cfg.get("model"),
+            "provider":       cfg.get("provider"),
+            "max_iterations": int(cfg.get("max_iterations") or 8),
+            "session_id":     None,
         }
 
     _save_meeting(data)
@@ -181,7 +243,10 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
         success=True,
         meeting_id=meeting_id,
         participants=list(data["participants"].keys()),
-        hint="Meeting created. Optionally call meeting_set_agenda, then use meeting_ask_one / meeting_chain / meeting_group_discuss.",
+        hint=(
+            "Meeting created. Optionally call meeting_set_agenda / meeting_add_notes, "
+            "then use meeting_ask_one / meeting_chain / meeting_group_discuss."
+        ),
     )
 
 
@@ -198,39 +263,46 @@ def _handle_set_agenda(args: dict, runtime: dict) -> str:
 def _handle_add_notes(args: dict, runtime: dict) -> str:
     data = _load_meeting(_meeting_id(runtime))
     content = str(args.get("content") or "").strip()
-    if data["notes"]:
-        data["notes"] += f"\n\n{content}"
-    else:
-        data["notes"] = content
+    data["notes"] = (data["notes"] + f"\n\n{content}").strip() if data["notes"] else content
     _save_meeting(data)
     return json_result(success=True)
 
 
 def _handle_ask_one(args: dict, runtime: dict) -> str:
-    """Ask a single participant a question. Returns their response."""
-    data        = _load_meeting(_meeting_id(runtime))
-    name        = str(args.get("participant") or "").strip()
-    question    = str(args.get("question") or "").strip()
-    context     = str(args.get("context") or "").strip()
+    """Ask a single participant a question.
+
+    Context injected: agenda + notes + full transcript so far + question.
+    """
+    data     = _load_meeting(_meeting_id(runtime))
+    name     = str(args.get("participant") or "").strip()
+    question = str(args.get("question")    or "").strip()
 
     if name not in data["participants"]:
         return json_result(success=False, error=f"Participant '{name}' not found")
 
     participant = data["participants"][name]
-    response    = _run_participant(participant, question, shared_context=context)
+
+    # Build discussion history from full transcript so far
+    discussion_history = [
+        {"speaker": e["speaker"], "content": e["content"], "round": e.get("round")}
+        for e in data["transcript"]
+        if e.get("speaker") != "moderator"
+    ]
+
+    user_message = _build_participant_message(data, name, question, discussion_history)
+    response = _run_participant(participant, user_message)
 
     _append_transcript(data, name, response)
-    data["participants"][name] = participant   # updated session_history
+    data["participants"][name] = participant
     _save_meeting(data)
 
     return json_result(success=True, participant=name, response=response)
 
 
 def _handle_chain(args: dict, runtime: dict) -> str:
-    """Sequential chain: each participant sees all previous responses before replying.
+    """Sequential chain: each participant sees ALL prior responses (all rounds, all speakers).
 
-    Rounds > 1 means the whole chain repeats, with participants seeing the
-    accumulated transcript from prior rounds as shared context.
+    Each turn's user message = agenda + notes + everything said so far + "your turn".
     """
     data         = _load_meeting(_meeting_id(runtime))
     participants = args.get("participants") or []
@@ -241,65 +313,91 @@ def _handle_chain(args: dict, runtime: dict) -> str:
     if missing:
         return json_result(success=False, error=f"Unknown participants: {missing}")
 
-    chain_transcript: list[dict] = []
+    # Accumulate responses across ALL rounds
+    chain_history: list[dict[str, Any]] = []
 
     for round_num in range(1, rounds + 1):
         for name in participants:
-            prior = "\n\n".join(
-                f"{e['speaker']}: {e['content']}" for e in chain_transcript
-            )
-            shared = f"[Round {round_num}]\n{prior}" if prior else f"[Round {round_num}]"
             participant = data["participants"][name]
-            response    = _run_participant(participant, prompt, shared_context=shared)
-            entry = {"speaker": name, "content": response, "round": round_num}
-            chain_transcript.append(entry)
-            _append_transcript(data, name, response)
-            data["participants"][name] = participant
+            user_message = _build_participant_message(
+                data, name, prompt, chain_history
+            )
+            response = _run_participant(participant, user_message)
 
-    _save_meeting(data)
-    summary = "\n\n".join(f"{e['speaker']} (r{e['round']}): {e['content']}" for e in chain_transcript)
+            entry = {"speaker": name, "content": response, "round": round_num}
+            chain_history.append(entry)
+            _append_transcript(data, name, response, round_num=round_num)
+            data["participants"][name] = participant
+            _save_meeting(data)   # persist after each speaker so UI can refresh
+
+    summary = "\n\n".join(
+        f"[Round {e['round']}] {e['speaker']}: {e['content']}"
+        for e in chain_history
+    )
     return json_result(success=True, rounds=rounds, transcript=summary)
 
 
 def _handle_group_discuss(args: dict, runtime: dict) -> str:
-    """Free group discussion: in each round every participant sees all responses
-    from the previous round before replying.
+    """Parallel group discussion: all participants respond simultaneously each round.
+
+    Each round:
+      - All participants run in parallel (ThreadPoolExecutor)
+      - Each participant sees agenda + notes + ALL responses from PREVIOUS rounds only
+        (current-round peers haven't spoken yet — that's the parallel constraint)
+      - After all parallel calls complete, responses are collected and become visible
+        to all participants in the next round
     """
     data         = _load_meeting(_meeting_id(runtime))
     participants = args.get("participants") or []
-    topic        = str(args.get("topic") or "").strip()
+    topic        = str(args.get("topic")  or "").strip()
     rounds       = int(args.get("rounds") or 2)
 
     missing = [n for n in participants if n not in data["participants"]]
     if missing:
         return json_result(success=False, error=f"Unknown participants: {missing}")
 
-    all_rounds: list[list[dict]] = []
+    all_rounds: list[list[dict[str, Any]]] = []
 
     for round_num in range(1, rounds + 1):
-        prior_text = ""
-        if all_rounds:
-            lines = []
-            for r_idx, r_entries in enumerate(all_rounds, 1):
-                for e in r_entries:
-                    lines.append(f"[Round {r_idx}] {e['speaker']}: {e['content']}")
-            prior_text = "\n\n".join(lines)
+        # Prior rounds only — parallel peers haven't spoken yet
+        prior_history: list[dict[str, Any]] = [
+            entry
+            for r_entries in all_rounds
+            for entry in r_entries
+        ]
 
-        round_entries: list[dict] = []
-        for name in participants:
-            shared = f"Topic: {topic}"
-            if prior_text:
-                shared += f"\n\nPrevious discussion:\n{prior_text}"
-            participant = data["participants"][name]
-            response    = _run_participant(participant, f"[Round {round_num}] Share your thoughts.", shared_context=shared)
-            entry = {"speaker": name, "content": response, "round": round_num}
-            round_entries.append(entry)
-            _append_transcript(data, name, response)
-            data["participants"][name] = participant
+        question = f"[Round {round_num}] {topic}"
 
-        all_rounds.append(round_entries)
+        # Capture participant snapshots for thread safety
+        participant_snapshots = {
+            name: dict(data["participants"][name])
+            for name in participants
+        }
 
-    _save_meeting(data)
+        def _run_one(name: str) -> dict[str, Any]:
+            p = participant_snapshots[name]
+            msg = _build_participant_message(data, name, question, prior_history)
+            response = _run_participant(p, msg)
+            # Write updated session_history + session_id back to live data
+            # (thread-safe: each name is a distinct dict key)
+            data["participants"][name]["session_history"] = p.get("session_history") or []
+            if p.get("session_id"):
+                data["participants"][name]["session_id"] = p["session_id"]
+            return {"speaker": name, "content": response, "round": round_num}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(participants)) as ex:
+            futures = {ex.submit(_run_one, name): name for name in participants}
+            round_responses_unordered = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+        # Restore the declared participant order
+        order = {name: i for i, name in enumerate(participants)}
+        round_responses = sorted(round_responses_unordered, key=lambda e: order.get(e["speaker"], 999))
+
+        all_rounds.append(round_responses)
+        for entry in round_responses:
+            _append_transcript(data, entry["speaker"], entry["content"], round_num=round_num)
+        _save_meeting(data)
+
     summary_lines = [
         f"[Round {e['round']}] {e['speaker']}: {e['content']}"
         for r in all_rounds for e in r
@@ -308,11 +406,6 @@ def _handle_group_discuss(args: dict, runtime: dict) -> str:
 
 
 def _handle_conclude(args: dict, runtime: dict) -> str:
-    """Record the moderator's final conclusion, close the meeting, and end the agent loop.
-
-    Setting runtime['final_response'] causes GeneralAgent to exit immediately —
-    no separate respond_to_user call is needed.
-    """
     data = _load_meeting(_meeting_id(runtime))
     conclusion = str(args.get("conclusion") or "").strip()
     data["conclusion"] = conclusion
@@ -320,24 +413,18 @@ def _handle_conclude(args: dict, runtime: dict) -> str:
     _append_transcript(data, "moderator", f"[CONCLUSION] {conclusion}")
     _save_meeting(data)
     runtime.pop("meeting_id", None)
-    runtime["final_response"] = conclusion   # triggers agent loop exit
+    runtime["final_response"] = conclusion
     return json_result(success=True, conclusion=conclusion, meeting_id=data["meeting_id"])
 
 
-# ── Registration ──────────────────────────────────────────────────────────
+# ── Registration ──────────────────────────────────────────────────────────────
 
 def register_meeting_tools() -> None:
-    """Opt-in: register all meeting orchestration tools.
-
-    Call this once at startup for agents that will act as meeting moderators.
-    Do NOT call for regular research agents — they should not have these tools.
-    """
     registry.register("meeting_create_participants", {
         "description": (
             "Start a meeting by creating participant agents. "
-            "Each participant is a full agent with their own tool loop and session history, "
-            "but without kanban or meeting tools. "
-            "Returns a meeting_id that subsequent meeting tools use automatically."
+            "Each participant responds via respond_to_user only — no file writing. "
+            "All context (agenda, notes, prior responses) is injected into each turn automatically."
         ),
         "parameters": {
             "type": "object",
@@ -349,12 +436,12 @@ def register_meeting_tools() -> None:
                         "type": "object",
                         "properties": {
                             "name":           {"type": "string"},
-                            "role":           {"type": "string", "description": "Short role description, e.g. 'Software Architect'"},
-                            "skills":         {"type": "string", "description": "Domain knowledge or capabilities"},
+                            "role":           {"type": "string"},
+                            "skills":         {"type": "string"},
                             "system_prompt":  {"type": "string", "description": "Override full system prompt (optional)"},
                             "model":          {"type": "string"},
                             "provider":       {"type": "string"},
-                            "max_iterations": {"type": "integer", "default": 12},
+                            "max_iterations": {"type": "integer", "default": 8},
                         },
                         "required": ["name"],
                     },
@@ -365,7 +452,7 @@ def register_meeting_tools() -> None:
     }, _handle_create_participants)
 
     registry.register("meeting_set_agenda", {
-        "description": "Set the meeting agenda (visible to the moderator, not automatically to participants).",
+        "description": "Set the meeting agenda. Automatically included in every participant's context.",
         "parameters": {
             "type": "object",
             "properties": {"agenda": {"type": "string"}},
@@ -374,7 +461,11 @@ def register_meeting_tools() -> None:
     }, _handle_set_agenda)
 
     registry.register("meeting_add_notes", {
-        "description": "Append text to the shared meeting notes. Use this to record key points or compress prior discussion before it grows too long.",
+        "description": (
+            "Append text to shared moderator notes. "
+            "Notes are included in every subsequent participant turn — use to inject background, "
+            "constraints, or key facts discovered mid-meeting."
+        ),
         "parameters": {
             "type": "object",
             "properties": {"content": {"type": "string"}},
@@ -383,13 +474,16 @@ def register_meeting_tools() -> None:
     }, _handle_add_notes)
 
     registry.register("meeting_ask_one", {
-        "description": "Ask a single participant a question. The participant runs their full agent loop and returns a final response. Optionally pass context (e.g. prior responses) they should consider.",
+        "description": (
+            "Ask a single participant a question. "
+            "They receive: agenda + notes + full transcript so far + your question. "
+            "They respond via respond_to_user."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "participant": {"type": "string", "description": "Participant name"},
+                "participant": {"type": "string"},
                 "question":    {"type": "string"},
-                "context":     {"type": "string", "description": "Optional shared context to show this participant (not added to their session history)"},
             },
             "required": ["participant", "question"],
         },
@@ -397,15 +491,16 @@ def register_meeting_tools() -> None:
 
     registry.register("meeting_chain", {
         "description": (
-            "Sequential chain: participants respond one by one, each seeing all previous responses. "
-            "Optionally repeat for multiple rounds."
+            "Sequential chain: participants speak one by one. "
+            "Each speaker receives ALL prior responses (all rounds, all speakers) in their context. "
+            "Use rounds>1 to iterate the full chain multiple times."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "participants": {"type": "array", "items": {"type": "string"}, "description": "Ordered list of participant names"},
-                "prompt":       {"type": "string", "description": "The question or topic for the chain"},
-                "rounds":       {"type": "integer", "default": 1, "description": "Number of times to repeat the full chain"},
+                "prompt":       {"type": "string", "description": "The question or topic for each speaker"},
+                "rounds":       {"type": "integer", "default": 1},
             },
             "required": ["participants", "prompt"],
         },
@@ -413,8 +508,10 @@ def register_meeting_tools() -> None:
 
     registry.register("meeting_group_discuss", {
         "description": (
-            "Free group discussion: in each round every participant sees all responses from the previous round. "
-            "Good for open brainstorming or debate."
+            "Parallel group discussion: all participants respond simultaneously each round. "
+            "Within a round, participants cannot see each other's current-round responses "
+            "(they run in parallel). Between rounds, all previous responses are visible. "
+            "Use rounds>=2 for iterative refinement."
         ),
         "parameters": {
             "type": "object",
@@ -428,11 +525,14 @@ def register_meeting_tools() -> None:
     }, _handle_group_discuss)
 
     registry.register("meeting_conclude", {
-        "description": "Record the final conclusion and close the meeting. Then call respond_to_user with the conclusion.",
+        "description": (
+            "Record the final conclusion, close the meeting, and end the agent loop. "
+            "Call this after all discussion is done."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "conclusion": {"type": "string", "description": "The moderator's synthesized conclusion from the discussion"},
+                "conclusion": {"type": "string"},
             },
             "required": ["conclusion"],
         },

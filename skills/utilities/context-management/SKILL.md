@@ -175,6 +175,50 @@ python run_research_agent.py --guardian --chat
 → 进程退出，Guardian 自动重启
 → 新进程加载了修改后的 prompts.py
 
+## High-Level 调度 Agent 行为红线（2026-06-30 新增）
+
+作为调度 agent，以下行为**严格禁止**：
+
+### 红线 1：Worker 出错时不要自行补救
+
+如果 worker 报错、输出不符合预期、或文件写入失败，**不要自己动手写文件来"补上"**。
+
+```
+❌ 错误做法：worker 写 paper_idea.md 失败 → 我自己 write_file 写一份
+✅ 正确做法：kanban_show_task 查看错误 → 向用户报告错误详情 → 让用户决定下一步
+```
+
+理由：我是调度 agent，不是 worker。自行补救会：
+- 掩盖 worker 的真实问题（bug、配置错误、权限问题）
+- 让用户误以为 pipeline 正常完成
+- 绕过 skill 中定义的质量控制流程
+
+### 红线 2：不要反复读 worker 内部 session 缓存文件
+
+不要用 `read_file` 读 `sessions/kanban/*/workers/*.json` 来轮询 worker 状态。
+
+```
+❌ 错误做法：read_file('sessions/kanban/board/workers/t_xxx.json') 反复读
+✅ 正确做法：
+   1. kanban_show_task(board, task_id) 检查状态
+   2. kanban_notify_subscribe(board, events=['pipeline_complete']) 订阅通知
+   3. respond_to_user 结束本轮，等通知触发
+```
+
+理由：
+- 缓存文件是内部实现细节，格式可能变化
+- 轮询浪费 token（每次 read_file 结果都进上下文）
+- 订阅机制就是为这个场景设计的
+
+### 红线 3：不要空等
+
+任务发起后，不要反复 poll 状态或等待 worker 完成。
+
+```
+❌ 错误做法：kanban_dispatch → read_file(worker cache) → 循环
+✅ 正确做法：kanban_dispatch → kanban_notify_subscribe → respond_to_user
+```
+
 ## 不要 compact 的场景
 
 - **正在执行一个连续的任务流**（如正在逐页浏览一个网站），compact 会丢失中间状态

@@ -73,3 +73,11 @@ OA题目方案「跨境合规情报融合引擎」已设计完成，保存在 re
 **Target venue**: NeurIPS 2027 or ICLR 2027 (methods paper). ACL 2027 as alternative (NLP/agent framing).
 
 **Full report**: reports/novel_paper_idea_ctrlR_agent_tool_use.md
+§
+## Lesson: High-level agent 行为红线 (2026-06-30)
+
+用户明确禁止的两类行为：
+1. **Worker 出错时不要自行补救** — 如果 worker 报错或输出不符合预期，直接向用户报告错误，不要自己动手写文件来"补上"。我是调度 agent，不是 worker。
+2. **不要反复读 worker 内部 session 缓存文件** — 不要用 read_file 读 kanban workers/ 下的 JSON 缓存来轮询状态。正确做法：kanban_show_task 检查状态 + kanban_notify_subscribe 订阅 pipeline_complete 事件 + respond_to_user 结束本轮，等通知触发。
+
+关联 skill: utilities/context-management 应该补充这个行为准则。
