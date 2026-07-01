@@ -63,7 +63,8 @@ def _start(kind: str, args: dict, runtime: dict) -> str:
         "model": args.get("model"),
         "max_iterations": args.get("max_iterations"),
         "user_prompt": args.get("user_prompt") or args.get("prompt") or "",
-        "system_prompt": args.get("system_prompt") or "",
+        "system_prompt": "",
+        "agent_role": "tool_subagent",
     }
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
@@ -80,26 +81,19 @@ def _start(kind: str, args: dict, runtime: dict) -> str:
     )
 
 
-def _h_plan_subagent(args: dict, runtime: dict) -> str:
+def _h_tool_subagent(args: dict, runtime: dict) -> str:
     prompt = str(args.get("user_prompt") or args.get("prompt") or "").strip()
     if not prompt:
         return json_result(success=False, error="user_prompt is required")
-    return _start("plan_subagent", args, runtime)
+    return _start("tool_subagent", args, runtime)
 
 
-def _h_plan_subllm(args: dict, runtime: dict) -> str:
-    if not str(args.get("system_prompt") or "").strip():
-        return json_result(success=False, error="system_prompt is required")
-    if not str(args.get("user_prompt") or "").strip():
-        return json_result(success=False, error="user_prompt is required")
-    return _start("plan_subllm", args, runtime)
-
-
-registry.register("plan_subagent", {
+registry.register("tool_subagent", {
     "description": (
-        "Start a backend sub-agent subprocess with a user_prompt. Returns immediately "
-        "with a cache_path. The subprocess uses the general agent system prompt and "
-        "writes live session status, messages, and final result to that cache file."
+        "Start a restricted backend helper sub-agent subprocess with a user_prompt. "
+        "Returns immediately with a cache_path. This is for narrow independent helper work; "
+        "by default the sub-agent cannot spawn more subagents, manage Kanban, or run meetings. "
+        "It writes live session status, messages, and final result to that cache file."
     ),
     "parameters": {
         "type": "object",
@@ -111,22 +105,4 @@ registry.register("plan_subagent", {
         },
         "required": ["user_prompt"],
     },
-}, _h_plan_subagent)
-
-registry.register("plan_subllm", {
-    "description": (
-        "Start a backend LLM subprocess with system_prompt and user_prompt. Returns "
-        "immediately with a cache_path. The subprocess writes running/completed/error "
-        "status and final text to that cache file."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "system_prompt": {"type": "string"},
-            "user_prompt": {"type": "string"},
-            "provider": {"type": "string", "enum": ["deepseek", "codex", "openai"]},
-            "model": {"type": "string"},
-        },
-        "required": ["system_prompt", "user_prompt"],
-    },
-}, _h_plan_subllm)
+}, _h_tool_subagent)

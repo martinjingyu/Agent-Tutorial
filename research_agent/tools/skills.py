@@ -91,7 +91,19 @@ def _skills_list(args: dict, runtime: dict) -> str:
             cat = rel.parts[0] if len(rel.parts) > 1 else None
             if category and cat != category:
                 continue
-            skills.append({"name": name, "description": description[:1024], "category": cat})
+            audience = frontmatter.get("audience")
+            if isinstance(audience, list):
+                audience_value = ",".join(str(item) for item in audience)
+            elif audience:
+                audience_value = str(audience)
+            else:
+                audience_value = None
+            skills.append({
+                "name": name,
+                "description": description[:1024],
+                "category": cat,
+                "audience": audience_value,
+            })
         except OSError:
             continue
     return json_result(success=True, skills=skills, count=len(skills))

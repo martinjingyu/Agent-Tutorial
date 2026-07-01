@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Generator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 
@@ -207,10 +207,41 @@ def _active_session_ids() -> set[str]:
     return ids
 
 
+def _skills_index() -> str:
+    from ..tools import load_builtin_tools, registry
+
+    load_builtin_tools()
+    if "skills_list" not in registry.names:
+        return ""
+    try:
+        result = registry.dispatch("skills_list", {}, {"task_id": "web_self_review"})
+        data = json.loads(result)
+        lines = []
+        for skill in data.get("skills", []):
+            cat = f"{skill.get('category')}/" if skill.get("category") else ""
+            audience = skill.get("audience")
+            audience_text = f" [audience: {audience}]" if audience else ""
+            lines.append(f"- {cat}{skill.get('name')}{audience_text}: {skill.get('description')}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def _parse_self_review_command(message: str) -> str | None:
+    stripped = message.strip()
+    for command in ("/self-review", "/review-self", "/sr"):
+        if stripped == command:
+            return ""
+        if stripped.startswith(command + " "):
+            return stripped[len(command) :].strip()
+    return None
+
+
 def _list_sessions() -> list[dict]:
     sub_ids    = _sub_session_ids()
     active_ids = _active_session_ids()
     sessions = []
+    seen_ids: set[str] = set()
     for f in sorted(SESSIONS_DIR.glob("*.json"), reverse=True):
         data = _read_json(f)
         if not isinstance(data, list):
@@ -220,6 +251,7 @@ def _list_sessions() -> list[dict]:
         is_sub_by_meta = has_meta and bool(data[0].get("sub_agent"))
         msgs = data[1:] if has_meta else data
         session_id = f.stem
+        seen_ids.add(session_id)
         model = next((m.get("model") for m in msgs if isinstance(m, dict) and m.get("model")), "")
         created = f.stat().st_mtime
         sessions.append({
@@ -230,10 +262,25 @@ def _list_sessions() -> list[dict]:
             "is_sub":        is_sub_by_meta or session_id in sub_ids,
             "is_active":     session_id in active_ids,
         })
+    for session_id, sess in _chat_sessions.items():
+        if session_id in seen_ids:
+            continue
+        history = sess.get("history") or []
+        sessions.insert(0, {
+            "id":            session_id,
+            "created_at":    datetime.now().isoformat(timespec="seconds"),
+            "message_count": len(history),
+            "model":         "",
+            "is_sub":        False,
+            "is_active":     bool(sess.get("running")),
+        })
     return sessions
 
 
 def _session_messages(session_id: str) -> list[dict]:
+    sess = _chat_sessions.get(session_id)
+    if sess and sess.get("history"):
+        return list(sess.get("history") or [])
     path = SESSIONS_DIR / f"{session_id}.json"
     if not path.exists():
         return []
@@ -365,6 +412,7 @@ class _WebStreamUI:
 
     def __init__(self, q: "queue.SimpleQueue[dict]") -> None:
         self._q = q
+        self._pending_response_message = ""
 
     def _push(self, **kwargs: Any) -> None:
         try:
@@ -379,11 +427,23 @@ class _WebStreamUI:
         self._push(type="iteration", i=iteration)
 
     def tool_start(self, name: str, args: dict) -> None:
+        if name == "respond_to_user":
+            self._pending_response_message = str(args.get("message") or "")
+            return
         self._push(type="tool_start", name=name,
                    args=json.dumps(args, ensure_ascii=False, indent=2))
 
-    def tool_end(self, name: str, result: str) -> None:
-        self._push(type="tool_end", name=name)
+    def tool_done(self, name: str, result: str) -> None:
+        if name == "respond_to_user":
+            if self._pending_response_message:
+                self._push(type="assistant_message", text=self._pending_response_message)
+            self._pending_response_message = ""
+            return
+        preview = result if len(result) <= 4000 else result[:4000] + "\n[...truncated]"
+        self._push(type="tool_end", name=name, result=preview)
+
+    def tool_end(self, name: str, result: str = "") -> None:
+        self.tool_done(name, result)
 
     def event(self, label: str, detail: str = "") -> None:
         self._push(type="event", label=label, detail=detail)
@@ -436,6 +496,14 @@ def _auto_resume_session(session_id: str, wake: dict) -> None:
         content = f"[kanban notification] Board '{board}' pipeline_complete."
         if extra:
             content += f"\n\nRequested follow-up: {extra}"
+        if wake.get("has_meeting_task"):
+            content += (
+                "\n\nMeeting follow-up rule:\n"
+                "- Treat the meeting result as planning input for the next phase.\n"
+                "- Review the conclusion, then create downstream Kanban tasks or a Kanban pipeline for substantial deliverables.\n"
+                "- Do not perform the downstream worker work inline in this resumed turn unless the user explicitly asked for direct execution.\n"
+                "- After dispatching follow-up Kanban work, subscribe to completion notifications and respond_to_user."
+            )
         pending_msgs = [{"role": "user", "content": content}]
 
     trigger_message = "\n\n".join(m["content"] for m in pending_msgs)
@@ -444,7 +512,7 @@ def _auto_resume_session(session_id: str, wake: dict) -> None:
     history = _session_messages(session_id)
 
     q: "queue.SimpleQueue[dict]" = queue.SimpleQueue()
-    _chat_sessions[session_id] = {"history": history, "q": q, "running": True}
+    _chat_sessions[session_id] = {"history": history, "q": q, "running": True, "cancel": False}
 
     def _run() -> None:
         try:
@@ -455,6 +523,7 @@ def _auto_resume_session(session_id: str, wake: dict) -> None:
                 self_review=False,
                 ui=ui,
                 session_id=session_id,
+                cancel_check=lambda: bool(_chat_sessions.get(session_id, {}).get("cancel")),
             )
             result = agent.run(trigger_message, history=history)
             _chat_sessions[session_id]["history"] = result.get("messages", [])
@@ -542,6 +611,7 @@ async def list_sessions() -> list:
 async def get_session(session_id: str) -> dict:
     msgs  = _session_messages(session_id)
     usage = _usage_by_session().get(session_id, {})
+    sess = _chat_sessions.get(session_id)
     return {
         "session_id": session_id,
         "messages":   msgs,
@@ -549,6 +619,7 @@ async def get_session(session_id: str) -> dict:
         "out_tokens": usage.get("out", 0),
         "cost":       round(usage.get("cost", 0.0), 6),
         "model":      usage.get("model", ""),
+        "is_active":  bool(sess and sess.get("running")),
     }
 
 
@@ -582,6 +653,36 @@ async def get_board(board_name: str) -> dict:
     return d
 
 
+@app.get("/api/kanban/{board_name}/tasks/{task_id}/worker")
+async def get_kanban_worker(board_name: str, task_id: str) -> dict:
+    d = _board_detail(board_name)
+    if d is None:
+        raise HTTPException(status_code=404, detail="Board not found")
+    task = None
+    for candidate in d.get("tasks", []):
+        if candidate.get("id") == task_id:
+            task = candidate
+            break
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    cache_path = task.get("cache_path") or str(KANBAN_DIR / board_name / "workers" / f"{task_id}.json")
+    worker_data = _read_json(Path(str(cache_path)))
+    if not isinstance(worker_data, dict):
+        worker_data = {}
+    return {
+        "board": board_name,
+        "task": task,
+        "cache_path": cache_path,
+        "status": worker_data.get("status") or task.get("status"),
+        "final": worker_data.get("final") or task.get("final") or "",
+        "messages": worker_data.get("messages") or [],
+        "started_at": worker_data.get("started_at") or task.get("started_at") or task.get("created_at"),
+        "completed_at": worker_data.get("completed_at") or task.get("completed_at"),
+        "error": worker_data.get("error") or task.get("error"),
+    }
+
+
 @app.delete("/api/kanban/{board_name}")
 async def delete_board(board_name: str) -> dict:
     board_file = KANBAN_DIR / f"{board_name}.json"
@@ -592,6 +693,51 @@ async def delete_board(board_name: str) -> dict:
     if board_dir.exists():
         shutil.rmtree(board_dir, ignore_errors=True)
     return {"ok": True}
+
+
+@app.post("/api/kanban/{board_name}/tasks/{task_id}/cancel")
+async def cancel_kanban_task(board_name: str, task_id: str) -> dict:
+    from ..tools.kanban import _event, _kill_pid, _load_board, _save_board
+
+    data = _load_board(board_name)
+    task = data.get("tasks", {}).get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    pid = task.get("pid")
+    if pid:
+        try:
+            _kill_pid(int(pid))
+        except Exception:
+            pass
+    task["status"] = "cancelled"
+    task["completed_at"] = datetime.now().isoformat(timespec="seconds")
+    task["error"] = "cancelled from web dashboard"
+    task["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    cache_path = task.get("cache_path")
+    if cache_path:
+        try:
+            cached = _read_json(Path(str(cache_path)))
+            if not isinstance(cached, dict):
+                cached = {}
+            Path(str(cache_path)).write_text(
+                json.dumps(
+                    {
+                        **cached,
+                        "status": "cancelled",
+                        "error": "cancelled from web dashboard",
+                        "completed_at": task["completed_at"],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    default=str,
+                ),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+    _event(data, "task_cancelled", task_id=task_id, pid=pid, error=task["error"])
+    _save_board(data, board_name)
+    return {"ok": True, "board": board_name, "task_id": task_id, "pid": pid}
 
 
 # ── Meetings ──────────────────────────────────────────────────────────────
@@ -627,6 +773,21 @@ async def costs() -> dict:
 
 # ── Chat ──────────────────────────────────────────────────────────────────
 
+@app.post("/api/shutdown")
+async def shutdown_server(request: Request) -> dict:
+    client_host = request.client.host if request.client else ""
+    if client_host not in {"127.0.0.1", "::1", "localhost"}:
+        raise HTTPException(status_code=403, detail="Shutdown is only allowed from localhost")
+
+    def _shutdown() -> None:
+        import os
+        time.sleep(0.25)
+        os._exit(0)
+
+    threading.Thread(target=_shutdown, daemon=True, name="web-shutdown").start()
+    return {"ok": True, "message": "Server shutting down"}
+
+
 @app.delete("/api/chat/{session_id}/lock")
 async def force_unlock_session(session_id: str) -> dict:
     """Force-clear the 'running' flag for a stuck session."""
@@ -634,6 +795,19 @@ async def force_unlock_session(session_id: str) -> dict:
     if sess:
         sess["running"] = False
     return {"ok": True, "session_id": session_id}
+
+
+@app.post("/api/chat/{session_id}/interrupt")
+async def interrupt_chat(session_id: str) -> dict:
+    sess = _chat_sessions.get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    sess["cancel"] = True
+    sess["running"] = bool(sess.get("running"))
+    q = sess.get("q")
+    if q:
+        q.put({"type": "event", "label": "interrupt", "detail": "requested"})
+    return {"ok": True, "session_id": session_id, "running": sess.get("running", False)}
 
 
 @app.post("/api/chat")
@@ -651,11 +825,43 @@ async def chat_send(body: dict) -> dict:
         raise HTTPException(status_code=409, detail="session busy")
 
     q: "queue.SimpleQueue[dict]" = queue.SimpleQueue()
-    history = (sess or {}).get("history", [])
-    _chat_sessions[sid] = {"history": history, "q": q, "running": True}
+    history = (sess or {}).get("history") or (_session_messages(sid) if sid else [])
+    display_history = [*history, {"role": "user", "content": message}]
+    _chat_sessions[sid] = {"history": display_history, "q": q, "running": True, "cancel": False}
+    self_review_request = _parse_self_review_command(message)
 
     def _run() -> None:
         try:
+            if self_review_request is not None:
+                if not self_review_request:
+                    q.put({"type": "error", "error": "Usage: /self-review <what should the agent learn or improve?>"})
+                    return
+                from ..self_review import trigger_self_review
+
+                q.put({"type": "event", "label": "self-review", "detail": "starting"})
+                trigger_self_review(
+                    session_id=sid,
+                    task_id=f"web_self_review_{datetime.now().strftime('%H%M%S')}",
+                    messages=history,
+                    skills_index=_skills_index(),
+                    model=model,
+                    provider=provider,
+                    extra_instruction=self_review_request,
+                    background=False,
+                )
+                q.put({"type": "event", "label": "self-review", "detail": "complete"})
+                from ..state import save_session
+
+                updated_history = [
+                    *history,
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": "Self-review completed."},
+                ]
+                _chat_sessions[sid]["history"] = updated_history
+                save_session(sid, updated_history)
+                q.put({"type": "done", "final": "Self-review completed."})
+                return
+
             from ..agent import GeneralAgent
             ui = _WebStreamUI(q)
             agent = GeneralAgent(
@@ -665,6 +871,7 @@ async def chat_send(body: dict) -> dict:
                 self_review=False,
                 ui=ui,
                 session_id=sid,
+                cancel_check=lambda: bool(_chat_sessions.get(sid, {}).get("cancel")),
             )
             result = agent.run(message, history=history)
             _chat_sessions[sid]["history"] = result.get("messages", [])
@@ -738,6 +945,7 @@ async def sse_events() -> StreamingResponse:
                                          if not m["closed_at"] and m["meeting_id"]],
                     "cost":             costs["total_cost"],
                     "resumed_sessions": resumed,
+                    "active_talks":      [s for s in _list_sessions() if s["is_active"] and not s["is_sub"]],
                 }
                 yield f"data: {json.dumps(data)}\n\n"
             except Exception:
@@ -751,6 +959,9 @@ async def sse_events() -> StreamingResponse:
 # ── Dev server launcher ───────────────────────────────────────────────────
 
 def run(port: int = 7654, host: str = "127.0.0.1") -> None:
+    import os
     import uvicorn
+    os.environ["AGENT_PARENT_PID"] = str(os.getpid())
+    os.environ["AGENT_KILL_CHILDREN_ON_PARENT_EXIT"] = "1"
     print(f"  Agent Dashboard → http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="warning")

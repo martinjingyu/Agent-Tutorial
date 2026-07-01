@@ -6,6 +6,7 @@ from typing import Any
 
 from .agent import GeneralAgent
 from .kanban_watcher import KanbanWatcher
+from .self_review import trigger_self_review
 
 
 class ChatSession:
@@ -57,6 +58,19 @@ class ChatSession:
         """
         items, self._pending = self._pending, []
         return items
+
+    def run_self_review(self, request: str, *, background: bool = False) -> None:
+        """Run self-review on the current conversation with a manual instruction."""
+        trigger_self_review(
+            session_id=self.agent.session_id,
+            task_id=self.agent.task_id,
+            messages=self._history,
+            skills_index=self.agent._skills_index(),
+            model=self.agent.llm.model,
+            provider=self.agent.llm.provider,
+            extra_instruction=request,
+            background=background,
+        )
 
     def start_watcher(self, poll_interval: float = 0.5) -> ChatSession:
         """Start background kanban event watcher. Returns self for chaining.
@@ -124,6 +138,15 @@ class ChatSession:
                 continue
             if user_input in {"/exit", "/quit"}:
                 break
+            if user_input.startswith(("/self-review ", "/review-self ", "/sr ")):
+                _, request = user_input.split(maxsplit=1)
+                print("\n[self-review] Starting manual self-review...")
+                self.run_self_review(request, background=False)
+                print("[self-review] Done.")
+                continue
+            if user_input in {"/self-review", "/review-self", "/sr"}:
+                print("Usage: /self-review <what should the agent learn or improve?>")
+                continue
 
             print(self.run_turn(user_input))
 

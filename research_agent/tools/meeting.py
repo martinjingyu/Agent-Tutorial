@@ -47,9 +47,7 @@ _KANBAN_TOOL_NAMES = {
 }
 # Participants must NOT write files, run shell, spawn sub-agents, or touch memory/kanban
 _PARTICIPANT_WRITE_TOOLS = {
-    "write_file", "patch_file",
-    "terminal", "run_cmd",
-    "plan_subagent", "plan_subllm",
+    "tool_subagent",
     "memory",
     "request_restart",
 }
@@ -101,6 +99,10 @@ def _append_transcript(data: dict, speaker: str, content: str, round_num: int | 
     if round_num is not None:
         entry["round"] = round_num
     data["transcript"].append(entry)
+
+
+def _append_action(data: dict, action: str, **payload: Any) -> None:
+    data.setdefault("actions", []).append({"time": _now(), "action": action, **payload})
 
 
 # ── Context builder ───────────────────────────────────────────────────────────
@@ -176,6 +178,7 @@ def _run_participant(
         registry=participant_registry,
         ui=ConsoleUI(enabled=False, label=participant["name"]),
         sub_agent=True,
+        agent_role="participant",
     )
     result = agent.run(
         user_message,
@@ -202,6 +205,23 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
     if not participants_cfg:
         return json_result(success=False, error="participants list is required")
 
+    existing_meeting_id = runtime.get("meeting_id")
+    if existing_meeting_id:
+        try:
+            existing = _load_meeting(str(existing_meeting_id))
+            return json_result(
+                success=True,
+                meeting_id=existing_meeting_id,
+                participants=list((existing.get("participants") or {}).keys()),
+                already_exists=True,
+                hint=(
+                    "A meeting is already active in this moderator run. "
+                    "Do not call meeting_create_participants again; continue with agenda/discussion/conclusion."
+                ),
+            )
+        except FileNotFoundError:
+            runtime.pop("meeting_id", None)
+
     meeting_id = f"mtg_{uuid.uuid4().hex[:10]}"
     participant_names = [str(cfg.get("name") or "").strip() for cfg in participants_cfg if cfg.get("name")]
     default_name = "+".join(participant_names[:3])
@@ -214,6 +234,7 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
         "notes":      "",
         "conclusion": "",
         "transcript": [],
+        "actions":    [],
         "participants": {},
     }
     for cfg in participants_cfg:
@@ -223,6 +244,9 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
         role   = str(cfg.get("role")   or "").strip()
         skills = str(cfg.get("skills") or "").strip()
         system_prompt = (
+            "You are a meeting participant, not the main scheduling agent. "
+            "Answer only from your assigned expertise and the meeting context. "
+            "Do not create Kanban tasks, spawn agents, call meeting orchestration tools, or write project files.\n\n"
             f"You are {name}."
             + (f" Role: {role}." if role else "")
             + (f"\n\nSkills and knowledge:\n{skills}" if skills else "")
@@ -239,6 +263,15 @@ def _handle_create_participants(args: dict, runtime: dict) -> str:
 
     _save_meeting(data)
     runtime["meeting_id"] = meeting_id
+    _append_action(
+        data,
+        "create_participants",
+        participants=[
+            {"name": p.get("name"), "role": p.get("role"), "model": p.get("model"), "provider": p.get("provider")}
+            for p in data["participants"].values()
+        ],
+    )
+    _save_meeting(data)
     return json_result(
         success=True,
         meeting_id=meeting_id,
@@ -256,6 +289,7 @@ def _handle_set_agenda(args: dict, runtime: dict) -> str:
     data["agenda"] = agenda
     if agenda:
         data["name"] = _slugify(agenda)
+    _append_action(data, "set_agenda", agenda=agenda)
     _save_meeting(data)
     return json_result(success=True)
 
@@ -264,6 +298,7 @@ def _handle_add_notes(args: dict, runtime: dict) -> str:
     data = _load_meeting(_meeting_id(runtime))
     content = str(args.get("content") or "").strip()
     data["notes"] = (data["notes"] + f"\n\n{content}").strip() if data["notes"] else content
+    _append_action(data, "add_notes", content=content)
     _save_meeting(data)
     return json_result(success=True)
 
@@ -293,6 +328,7 @@ def _handle_ask_one(args: dict, runtime: dict) -> str:
     response = _run_participant(participant, user_message)
 
     _append_transcript(data, name, response)
+    _append_action(data, "ask_one", participant=name, question=question, response=response)
     data["participants"][name] = participant
     _save_meeting(data)
 
@@ -315,8 +351,10 @@ def _handle_chain(args: dict, runtime: dict) -> str:
 
     # Accumulate responses across ALL rounds
     chain_history: list[dict[str, Any]] = []
+    action_rounds: list[dict[str, Any]] = []
 
     for round_num in range(1, rounds + 1):
+        round_entries: list[dict[str, Any]] = []
         for name in participants:
             participant = data["participants"][name]
             user_message = _build_participant_message(
@@ -326,14 +364,18 @@ def _handle_chain(args: dict, runtime: dict) -> str:
 
             entry = {"speaker": name, "content": response, "round": round_num}
             chain_history.append(entry)
+            round_entries.append(entry)
             _append_transcript(data, name, response, round_num=round_num)
             data["participants"][name] = participant
             _save_meeting(data)   # persist after each speaker so UI can refresh
+        action_rounds.append({"round": round_num, "responses": round_entries})
 
     summary = "\n\n".join(
         f"[Round {e['round']}] {e['speaker']}: {e['content']}"
         for e in chain_history
     )
+    _append_action(data, "chain", participants=participants, prompt=prompt, rounds=rounds, round_results=action_rounds)
+    _save_meeting(data)
     return json_result(success=True, rounds=rounds, transcript=summary)
 
 
@@ -402,6 +444,8 @@ def _handle_group_discuss(args: dict, runtime: dict) -> str:
         f"[Round {e['round']}] {e['speaker']}: {e['content']}"
         for r in all_rounds for e in r
     ]
+    _append_action(data, "group_discuss", participants=participants, topic=topic, rounds=rounds, round_results=all_rounds)
+    _save_meeting(data)
     return json_result(success=True, rounds=rounds, transcript="\n\n".join(summary_lines))
 
 
@@ -411,6 +455,7 @@ def _handle_conclude(args: dict, runtime: dict) -> str:
     data["conclusion"] = conclusion
     data["closed_at"]  = _now()
     _append_transcript(data, "moderator", f"[CONCLUSION] {conclusion}")
+    _append_action(data, "conclude", conclusion=conclusion)
     _save_meeting(data)
     runtime.pop("meeting_id", None)
     runtime["final_response"] = conclusion
@@ -424,6 +469,131 @@ def register_meeting_tools() -> None:
         "description": (
             "Start a meeting by creating participant agents. "
             "Each participant responds via respond_to_user only — no file writing. "
+            "All context (agenda, notes, prior responses) is injected into each turn automatically."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "participants": {
+                    "type": "array",
+                    "description": "List of participant configs.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name":           {"type": "string"},
+                            "role":           {"type": "string"},
+                            "skills":         {"type": "string"},
+                            "system_prompt":  {"type": "string", "description": "Override full system prompt (optional)"},
+                            "model":          {"type": "string"},
+                            "provider":       {"type": "string"},
+                            "max_iterations": {"type": "integer", "default": 8},
+                        },
+                        "required": ["name"],
+                    },
+                },
+            },
+            "required": ["participants"],
+        },
+    }, _handle_create_participants)
+
+    registry.register("meeting_set_agenda", {
+        "description": "Set the meeting agenda. Automatically included in every participant's context.",
+        "parameters": {
+            "type": "object",
+            "properties": {"agenda": {"type": "string"}},
+            "required": ["agenda"],
+        },
+    }, _handle_set_agenda)
+
+    registry.register("meeting_add_notes", {
+        "description": (
+            "Append text to shared moderator notes. "
+            "Notes are included in every subsequent participant turn — use to inject background, "
+            "constraints, or key facts discovered mid-meeting."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"content": {"type": "string"}},
+            "required": ["content"],
+        },
+    }, _handle_add_notes)
+
+    registry.register("meeting_ask_one", {
+        "description": (
+            "Ask a single participant a question. "
+            "They receive: agenda + notes + full transcript so far + your question. "
+            "They respond via respond_to_user."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "participant": {"type": "string"},
+                "question":    {"type": "string"},
+            },
+            "required": ["participant", "question"],
+        },
+    }, _handle_ask_one)
+
+    registry.register("meeting_chain", {
+        "description": (
+            "Sequential chain: participants speak one by one. "
+            "Each speaker receives ALL prior responses (all rounds, all speakers) in their context. "
+            "Use rounds>1 to iterate the full chain multiple times."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "participants": {"type": "array", "items": {"type": "string"}, "description": "Ordered list of participant names"},
+                "prompt":       {"type": "string", "description": "The question or topic for each speaker"},
+                "rounds":       {"type": "integer", "default": 1},
+            },
+            "required": ["participants", "prompt"],
+        },
+    }, _handle_chain)
+
+    registry.register("meeting_group_discuss", {
+        "description": (
+            "Parallel group discussion: all participants respond simultaneously each round. "
+            "Within a round, participants cannot see each other's current-round responses "
+            "(they run in parallel). Between rounds, all previous responses are visible. "
+            "Use rounds>=2 for iterative refinement."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "participants": {"type": "array", "items": {"type": "string"}},
+                "topic":        {"type": "string"},
+                "rounds":       {"type": "integer", "default": 2},
+            },
+            "required": ["participants", "topic"],
+        },
+    }, _handle_group_discuss)
+
+    registry.register("meeting_conclude", {
+        "description": (
+            "Record the final conclusion, close the meeting, and end the agent loop. "
+            "Call this after all discussion is done."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "conclusion": {"type": "string"},
+            },
+            "required": ["conclusion"],
+        },
+    }, _handle_conclude)
+
+
+def register_moderator_tools() -> None:
+    """Register meeting discussion tools for a Moderator agent.
+
+    Moderators can create the participant roster, run the discussion,
+    and conclude the meeting.
+    """
+    registry.register("meeting_create_participants", {
+        "description": (
+            "Start a meeting by creating participant agents. "
+            "Each participant responds via respond_to_user only; no file writing. "
             "All context (agenda, notes, prior responses) is injected into each turn automatically."
         ),
         "parameters": {

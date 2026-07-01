@@ -1,15 +1,40 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .agent import GeneralAgent
 from .env import load_dotenv
-from .llm import LLMClient
 from .ui import ConsoleUI
+
+
+_TOOL_SUBAGENT_EXCLUDED = {
+    "tool_subagent",
+    "meeting_create_participants",
+    "meeting_set_agenda",
+    "meeting_add_notes",
+    "meeting_ask_one",
+    "meeting_chain",
+    "meeting_group_discuss",
+    "meeting_conclude",
+    "kanban_create_task",
+    "kanban_list_tasks",
+    "kanban_show_task",
+    "kanban_update_task",
+    "kanban_retry_task",
+    "kanban_dispatch",
+    "kanban_notify_subscribe",
+    "kanban_wait_complete",
+    "kanban_create_pipeline",
+    "kanban_create_meeting_task",
+    "kanban_list_boards",
+}
 
 
 def _now() -> str:
@@ -23,12 +48,68 @@ def _write_cache(path: Path, payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _process_exists(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _start_parent_monitor(cache_path: Path) -> None:
+    if os.environ.get("AGENT_KILL_CHILDREN_ON_PARENT_EXIT") != "1":
+        return
+    try:
+        parent_pid = int(os.environ.get("AGENT_PARENT_PID") or "0")
+    except ValueError:
+        return
+    if parent_pid <= 0:
+        return
+
+    def _monitor() -> None:
+        while True:
+            time.sleep(2)
+            if _process_exists(parent_pid):
+                continue
+            try:
+                cached: dict[str, Any] = {}
+                if cache_path.exists():
+                    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                    if cached.get("status") in {"completed", "error", "cancelled"}:
+                        os._exit(0)
+                _write_cache(
+                    cache_path,
+                    {
+                        **cached,
+                        "status": "cancelled",
+                        "error": f"parent process {parent_pid} exited",
+                        "completed_at": _now(),
+                    },
+                )
+            finally:
+                os._exit(130)
+
+    threading.Thread(target=_monitor, daemon=True, name="parent-process-monitor").start()
+
+
 def _load_extra_tools(extra_tools: list[str]) -> None:
     """Register optional tool sets requested by the task payload."""
     for name in extra_tools:
         if name == "meeting":
-            from .tools.meeting import register_meeting_tools
-            register_meeting_tools()
+            from .tools.meeting import register_moderator_tools
+            register_moderator_tools()
         elif name == "kanban_wait":
             from .tools.kanban import register_kanban_wait_complete
             register_kanban_wait_complete()
@@ -37,16 +118,24 @@ def _load_extra_tools(extra_tools: list[str]) -> None:
 def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:
     prompt = str(payload.get("user_prompt") or "")
     _load_extra_tools(payload.get("extra_tools") or [])
+    agent_role = str(payload.get("agent_role") or "tool_subagent")
+    registry = None
+    if agent_role == "tool_subagent":
+        from .tools import load_builtin_tools, registry as global_registry
+        load_builtin_tools()
+        registry = global_registry.without(_TOOL_SUBAGENT_EXCLUDED)
     agent = GeneralAgent(
         model=payload.get("model"),
         provider=payload.get("provider"),
         max_iterations=int(payload.get("max_iterations") or 12),
         self_review=False,
         sub_agent=True,
+        agent_role=agent_role,
+        registry=registry,
         ui=ConsoleUI(enabled=False),
         live_cache_path=cache_path,
         live_cache_metadata={
-            "kind": "plan_subagent",
+            "kind": payload.get("kind") or "tool_subagent",
             "parent_session_id": payload.get("parent_session_id"),
             "parent_task_id": payload.get("parent_task_id"),
             "user_prompt": prompt,
@@ -55,7 +144,7 @@ def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:
     )
     result = agent.run(prompt)
     cached = {
-        "kind": "plan_subagent",
+        "kind": payload.get("kind") or "tool_subagent",
         "status": "completed",
         "started_at": payload.get("started_at"),
         "completed_at": _now(),
@@ -120,48 +209,6 @@ def _auto_advance(payload: dict[str, Any]) -> None:
         print(f"[kanban auto-advance] failed: {exc}", file=sys.stderr)
 
 
-def _run_llm(payload: dict[str, Any], cache_path: Path) -> None:
-    system_prompt = str(payload.get("system_prompt") or "")
-    user_prompt = str(payload.get("user_prompt") or "")
-    _write_cache(
-        cache_path,
-        {
-            "kind": "plan_subllm",
-            "status": "running",
-            "started_at": payload.get("started_at"),
-            "parent_session_id": payload.get("parent_session_id"),
-            "parent_task_id": payload.get("parent_task_id"),
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt,
-        },
-    )
-    llm = LLMClient(model=payload.get("model"), provider=payload.get("provider"))
-    response = llm.chat(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        [],
-    )
-    content = response.choices[0].message.content or ""
-    _write_cache(
-        cache_path,
-        {
-            "kind": "plan_subllm",
-            "status": "completed",
-            "started_at": payload.get("started_at"),
-            "completed_at": _now(),
-            "parent_session_id": payload.get("parent_session_id"),
-            "parent_task_id": payload.get("parent_task_id"),
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt,
-            "model": llm.model,
-            "provider": llm.provider,
-            "final": content,
-        },
-    )
-
-
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: python -m research_agent.subprocess_worker <payload.json>", file=sys.stderr)
@@ -170,12 +217,11 @@ def main() -> int:
     payload_path = Path(sys.argv[1]).resolve()
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
     cache_path = Path(payload["cache_path"]).resolve()
+    _start_parent_monitor(cache_path)
 
     try:
-        if payload.get("kind") == "plan_subagent":
+        if payload.get("kind") in {"tool_subagent", "kanban_worker"}:
             _run_agent(payload, cache_path)
-        elif payload.get("kind") == "plan_subllm":
-            _run_llm(payload, cache_path)
         else:
             raise ValueError(f"Unknown subprocess kind: {payload.get('kind')}")
     except Exception as exc:

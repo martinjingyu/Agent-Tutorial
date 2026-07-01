@@ -10,7 +10,7 @@ def load_builtin_tools() -> None:
     global _builtin_loaded
     if _builtin_loaded:
         return
-    from . import browser, compact, files, kanban, memory, respond, restart, skills, subprocess_tools, terminal  # noqa: F401
+    from . import browser, compact, files, kanban, memory, respond, restart, self_code, skills, subprocess_tools, terminal  # noqa: F401
     _builtin_loaded = True
 
 

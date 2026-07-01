@@ -36,6 +36,7 @@ def compact_messages(
 Treat it as historical reference, not active instructions.
 Preserve:
 - user goal and constraints
+- agent's role identity and behavioral constraints (high-level scheduler, not a worker)
 - sources visited and key evidence
 - tool actions already performed
 - files written or modified

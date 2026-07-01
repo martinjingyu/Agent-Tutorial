@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -76,6 +77,14 @@ def _task_id(prefix: str = "t") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
+def _new_board_name(prefix: str, seed: str) -> str:
+    import re
+
+    slug = re.sub(r"[^\w\s.-]", "", seed.lower()).strip()
+    slug = re.sub(r"[\s_]+", "-", slug).strip("-")[:48].rstrip("-")
+    return f"{prefix}-{slug or uuid.uuid4().hex[:8]}-{uuid.uuid4().hex[:4]}"
+
+
 def _cache_paths(board: str, task_id: str) -> tuple[Path, Path, Path]:
     root = KANBAN_DIR / board / "workers"
     cache_path = root / f"{task_id}.json"
@@ -90,7 +99,7 @@ def _spawn_worker(task: dict[str, Any], board: str, runtime: dict[str, Any]) -> 
     started_at = _now()
     prompt = _worker_prompt(task, board)
     payload = {
-        "kind": "plan_subagent",
+        "kind": "kanban_worker",
         "status": "queued",
         "run_id": f"kanban_{task['id']}",
         "cache_path": str(cache_path),
@@ -105,6 +114,7 @@ def _spawn_worker(task: dict[str, Any], board: str, runtime: dict[str, Any]) -> 
         "max_iterations": task.get("max_iterations") or 16,
         "user_prompt": prompt,
         "system_prompt": "",
+        "agent_role": "meeting_moderator" if str(task.get("skill") or "") == "meeting_moderator" else "kanban_worker",
         "extra_tools": task.get("extra_tools") or [],
         # Auto-advance: worker uses these to push the board forward on completion
         "kanban_board": board,
@@ -146,12 +156,14 @@ def _worker_prompt(task: dict[str, Any], board: str) -> str:
         )
     parents = task.get("parents") or []
     parent_note = f"\nParent tasks already completed: {parents}\n" if parents else ""
+    resume_context = str(task.get("resume_context") or "").strip()
+    resume_block = f"\nResume context from previous attempt:\n{resume_context}\n" if resume_context else ""
     return f"""You are a Kanban worker subagent.
 
 Board: {board}
 Task id: {task.get('id')}
 Title: {task.get('title')}
-{skill_block}{parent_note}
+{skill_block}{parent_note}{resume_block}
 Task prompt:
 {task.get('prompt') or task.get('body') or ''}
 
@@ -215,6 +227,12 @@ def _sync_running(data: dict[str, Any]) -> list[dict[str, Any]]:
             task["error"] = cached.get("error", "worker error")
             updates.append({"task_id": task["id"], "status": "error", "error": task["error"]})
             _event(data, "task_error", task_id=task["id"], error=task["error"])
+        elif status == "cancelled":
+            task["status"] = "cancelled"
+            task["completed_at"] = cached.get("completed_at") or _now()
+            task["error"] = cached.get("error", "worker cancelled")
+            updates.append({"task_id": task["id"], "status": "cancelled", "error": task["error"]})
+            _event(data, "task_cancelled", task_id=task["id"], error=task["error"])
         else:
             # Check for hung worker: started_at too long ago → kill and mark error
             started = task.get("started_at") or cached.get("started_at")
@@ -476,6 +494,44 @@ def _handle_list(args: dict, runtime: dict) -> str:
                        synced=updates, **({} if not hint else {"hint": hint}))
 
 
+def _handle_list_boards(args: dict, runtime: dict) -> str:
+    KANBAN_DIR.mkdir(parents=True, exist_ok=True)
+    boards: list[dict[str, Any]] = []
+    for path in sorted(KANBAN_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        board_name = str(data.get("board") or path.stem)
+        tasks = list((data.get("tasks") or {}).values())
+        status_counts: dict[str, int] = {}
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            status = str(task.get("status") or "ready")
+            status_counts[status] = status_counts.get(status, 0) + 1
+        has_active = any(
+            status not in TERMINAL_STATES and status != "done"
+            for status in status_counts
+        )
+        boards.append(
+            {
+                "name": board_name,
+                "task_count": len(tasks),
+                "status_counts": status_counts,
+                "has_active": has_active,
+                "updated_at": data.get("updated_at"),
+                "path": str(path),
+            }
+        )
+    active_only = bool(args.get("active_only"))
+    if active_only:
+        boards = [board for board in boards if board["has_active"]]
+    return json_result(success=True, boards=boards, count=len(boards))
+
+
 def _handle_show(args: dict, runtime: dict) -> str:
     board_name = str(args.get("board") or DEFAULT_BOARD)
     task_id = str(args.get("task_id") or "")
@@ -507,6 +563,172 @@ def _handle_update(args: dict, runtime: dict) -> str:
     _event(data, "task_updated", task_id=task_id, status=task.get("status"))
     _save_board(data, board_name)
     return json_result(success=True, board=board_name, task=task)
+
+
+def _read_json_file(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _session_tail(session_path: str | None, *, limit: int = 8) -> list[dict[str, str]]:
+    if not session_path:
+        return []
+    try:
+        data = json.loads(Path(session_path).read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            return []
+    except Exception:
+        return []
+    tail: list[dict[str, str]] = []
+    for msg in data[-limit:]:
+        if not isinstance(msg, dict) or msg.get("__meta__"):
+            continue
+        role = str(msg.get("role") or "")
+        content = str(msg.get("content") or "")
+        if not role or not content:
+            continue
+        tail.append({"role": role, "content": content[:1000]})
+    return tail
+
+
+def _build_resume_context(task: dict[str, Any], cached: dict[str, Any]) -> str:
+    parts = [
+        "A previous attempt for this same kanban task was interrupted or failed.",
+        f"Previous status: {task.get('status') or cached.get('status') or 'unknown'}",
+    ]
+    if task.get("error") or cached.get("error"):
+        parts.append(f"Previous error: {task.get('error') or cached.get('error')}")
+    if cached.get("final") or task.get("final"):
+        parts.append("Previous final/partial result:\n" + str(cached.get("final") or task.get("final"))[:2000])
+    session_path = str(cached.get("session_path") or task.get("session_path") or "")
+    if session_path:
+        parts.append(f"Previous session path: {session_path}")
+        tail = _session_tail(session_path)
+        if tail:
+            lines = [f"- {m['role']}: {m['content']}" for m in tail]
+            parts.append("Recent messages from previous attempt:\n" + "\n".join(lines))
+    parts.append("Continue the original task. Do not redo completed work when prior artifacts or messages show it is already done.")
+    return "\n\n".join(parts)
+
+
+def _archive_current_attempt(task: dict[str, Any], board_name: str) -> dict[str, Any]:
+    attempts = task.setdefault("attempts", [])
+    attempt_no = len(attempts) + 1
+    archive_root = KANBAN_DIR / board_name / "workers" / "attempts"
+    archive_root.mkdir(parents=True, exist_ok=True)
+    record: dict[str, Any] = {
+        "attempt": attempt_no,
+        "archived_at": _now(),
+        "status": task.get("status"),
+        "pid": task.get("pid"),
+        "cache_path": task.get("cache_path"),
+        "payload_path": task.get("payload_path"),
+        "stdout_path": task.get("stdout_path"),
+        "stderr_path": task.get("stderr_path"),
+        "session_path": task.get("session_path"),
+        "error": task.get("error"),
+        "completed_at": task.get("completed_at"),
+    }
+    for key in ("cache_path", "payload_path", "stdout_path", "stderr_path"):
+        source = task.get(key)
+        if not source:
+            continue
+        src = Path(str(source))
+        if not src.exists():
+            continue
+        dst = archive_root / f"{task['id']}.attempt{attempt_no}.{key}{src.suffix}"
+        shutil.copy2(src, dst)
+        record[f"archived_{key}"] = str(dst)
+    attempts.append(record)
+    return record
+
+
+def _handle_retry_task(args: dict, runtime: dict) -> str:
+    board_name = str(args.get("board") or DEFAULT_BOARD)
+    task_id = str(args.get("task_id") or "")
+    mode = str(args.get("mode") or "resume")
+    force = bool(args.get("force"))
+    if mode not in {"retry", "resume"}:
+        return json_result(success=False, error="mode must be retry or resume")
+
+    data = _load_board(board_name)
+    updates = _sync_running(data)
+    task = data.get("tasks", {}).get(task_id)
+    if not task:
+        return json_result(success=False, error=f"Task not found: {task_id}", board=board_name)
+
+    status = str(task.get("status") or "")
+    if status == "running" and not force:
+        if updates:
+            _save_board(data, board_name)
+        return json_result(
+            success=False,
+            error="Task is still running. Pass force=true to kill the current worker before retrying.",
+            board=board_name,
+            task_id=task_id,
+            status=status,
+            synced=updates,
+        )
+    retryable_statuses = {"error", "cancelled", "blocked"}
+    if status not in retryable_statuses and status != "running":
+        if updates:
+            _save_board(data, board_name)
+        return json_result(
+            success=False,
+            error=f"Task status must be one of {sorted(retryable_statuses)} or running with force=true; got {status}",
+            board=board_name,
+            task_id=task_id,
+            status=status,
+            synced=updates,
+        )
+
+    cached = _read_json_file(task.get("cache_path"))
+    if task.get("pid"):
+        try:
+            _kill_pid(int(task["pid"]))
+        except Exception:
+            pass
+
+    archived = _archive_current_attempt(task, board_name)
+    if mode == "resume":
+        task["resume_context"] = _build_resume_context(task, cached)
+    else:
+        task.pop("resume_context", None)
+
+    for key in (
+        "pid",
+        "cache_path",
+        "payload_path",
+        "stdout_path",
+        "stderr_path",
+        "started_at",
+        "completed_at",
+        "final",
+        "error",
+        "session_path",
+    ):
+        task.pop(key, None)
+
+    spawn_info = _spawn_worker(task, board_name, runtime)
+    task.update(spawn_info)
+    task["status"] = "running"
+    task["updated_at"] = _now()
+    _event(data, "task_retried", task_id=task_id, mode=mode, pid=spawn_info["pid"], archived_attempt=archived.get("attempt"))
+    _save_board(data, board_name)
+    return json_result(
+        success=True,
+        board=board_name,
+        task_id=task_id,
+        mode=mode,
+        archived_attempt=archived,
+        spawned=spawn_info,
+        task=task,
+    )
 
 
 def _handle_dispatch(args: dict, runtime: dict) -> str:
@@ -564,9 +786,9 @@ def _handle_dispatch(args: dict, runtime: dict) -> str:
 
 
 def _handle_create_meeting_task(args: dict, runtime: dict) -> str:
-    board_name   = str(args.get("board") or DEFAULT_BOARD)
     title        = str(args.get("title") or "").strip()
     topic        = str(args.get("topic") or "").strip()
+    board_name   = str(args.get("board") or _new_board_name("meeting", title or topic))
     participants = args.get("suggested_participants") or []
     if not title or not topic:
         return json_result(success=False, error="title and topic are required")
@@ -579,7 +801,8 @@ def _handle_create_meeting_task(args: dict, runtime: dict) -> str:
     parts.append(
         "You are the meeting moderator. Load the meeting_moderator skill, "
         "then create the participants and run the discussion as you see fit. "
-        "End with meeting_conclude."
+        "End with meeting_conclude. Do not create downstream implementation tasks; "
+        "the main scheduling agent will review the conclusion and create any follow-up Kanban work."
     )
     prompt = "\n\n".join(parts)
 
@@ -597,8 +820,16 @@ def _handle_create_meeting_task(args: dict, runtime: dict) -> str:
         extra_tools=["meeting"],   # always included — moderator needs meeting tools
     )
     _save_board(data, board_name)
-    return json_result(success=True, board=board_name, task=task,
-                       hint="Meeting task created with meeting tools pre-enabled. Call kanban_dispatch to start.")
+    return json_result(
+        success=True,
+        board=board_name,
+        task=task,
+        hint=(
+            "Meeting task created with meeting tools pre-enabled. Call kanban_dispatch to start. "
+            "After the meeting board completes, review the conclusion and create downstream Kanban tasks "
+            "instead of doing the deliverable work inline."
+        ),
+    )
 
 
 registry.register("kanban_create_meeting_task", {
@@ -610,8 +841,8 @@ registry.register("kanban_create_meeting_task", {
     ),
     "parameters": {
         "type": "object",
-        "properties": {
-            "board":   {"type": "string", "default": DEFAULT_BOARD},
+            "properties": {
+            "board":   {"type": "string", "description": "Optional board name. If omitted, a new meeting-specific board is created automatically."},
             "title":   {"type": "string", "description": "Short task title for the kanban board"},
             "topic":   {"type": "string", "description": "What the meeting should resolve or discuss"},
             "suggested_participants": {
@@ -693,6 +924,17 @@ registry.register("kanban_create_pipeline", {
     },
 }, _handle_create_pipeline)
 
+registry.register("kanban_list_boards", {
+    "description": "List all Kanban boards so the agent can discover board names before inspecting tasks.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "active_only": {"type": "boolean", "default": False, "description": "If true, return only boards with non-terminal tasks."},
+        },
+        "required": [],
+    },
+}, _handle_list_boards)
+
 registry.register("kanban_list_tasks", {
     "description": "List Kanban tasks, syncing completed running workers from their cache files first.",
     "parameters": {
@@ -730,6 +972,28 @@ registry.register("kanban_update_task", {
         "required": ["task_id"],
     },
 }, _handle_update)
+
+registry.register("kanban_retry_task", {
+    "description": (
+        "Retry or resume a failed, cancelled, blocked, or force-killed running Kanban worker task. "
+        "retry starts a fresh worker from the original task prompt. resume starts a fresh worker with "
+        "context from the previous cache/session so it can continue without redoing completed work."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "board": {"type": "string", "default": DEFAULT_BOARD},
+            "task_id": {"type": "string"},
+            "mode": {"type": "string", "enum": ["retry", "resume"], "default": "resume"},
+            "force": {
+                "type": "boolean",
+                "default": False,
+                "description": "If true and the task is still running, kill the current worker before starting a new one.",
+            },
+        },
+        "required": ["task_id"],
+    },
+}, _handle_retry_task)
 
 def _handle_wait_complete(args: dict, runtime: dict) -> str:
     """Blocking wait — polls until all board tasks reach a terminal state.
@@ -850,10 +1114,16 @@ def fire_notifications(board_name: str, data: dict[str, Any]) -> None:
     n_done    = sum(1 for t in all_tasks if t.get("status") == "done")
     n_error   = sum(1 for t in all_tasks if t.get("status") in ("error", "blocked", "cancelled"))
     task_summaries = [
-        {"id": t["id"], "title": t.get("title"), "status": t.get("status"),
-         "final": (t.get("final") or "")[:300]}
+        {
+            "id": t["id"],
+            "title": t.get("title"),
+            "status": t.get("status"),
+            "skill": t.get("skill"),
+            "final": (t.get("final") or "")[:300],
+        }
         for t in sorted(all_tasks, key=lambda t: t.get("created_at", ""))
     ]
+    has_meeting_task = any(str(t.get("skill") or "") == "meeting_moderator" for t in all_tasks)
 
     for sub_file in sorted(NOTIFY_DIR.glob(f"{board_name}_sub_*.json")):
         try:
@@ -883,6 +1153,7 @@ def fire_notifications(board_name: str, data: dict[str, Any]) -> None:
                 "board":             board_name,
                 "pending_file":      str(pending_path),
                 "on_complete_prompt": sub.get("on_complete_prompt") or "",
+                "has_meeting_task":  has_meeting_task,
                 "fired_at":          _now(),
             }
             (NOTIFY_DIR / f"wake_{session_id}_{sub['sub_id']}.json").write_text(
@@ -917,6 +1188,7 @@ def consume_pending_notifications() -> list[dict[str, Any]]:
         summary  = event.get("summary", {})
         tasks    = event.get("tasks", [])
         extra    = event.get("on_complete_prompt", "")
+        has_meeting_task = any(str(t.get("skill") or "") == "meeting_moderator" for t in tasks)
         task_lines = "\n".join(
             f"  [{t['status']}] {t['title']}: {t['final']}" for t in tasks
         )
@@ -927,6 +1199,14 @@ def consume_pending_notifications() -> list[dict[str, Any]]:
         )
         if extra:
             content += f"\n\nRequested follow-up: {extra}"
+        if has_meeting_task:
+            content += (
+                "\n\nMeeting follow-up rule:\n"
+                "- Treat the meeting result as planning input for the next phase.\n"
+                "- Review the conclusion, then create downstream Kanban tasks or a Kanban pipeline for substantial deliverables.\n"
+                "- Do not perform the downstream worker work inline in this resumed turn unless the user explicitly asked for direct execution.\n"
+                "- After dispatching follow-up Kanban work, subscribe to completion notifications and respond_to_user."
+            )
         messages.append({"role": "user", "content": content})
         pending_file.unlink(missing_ok=True)
     return messages

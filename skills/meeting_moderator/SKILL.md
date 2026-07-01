@@ -52,7 +52,8 @@ do NOT call `respond_to_user` afterwards.
 ## Rules
 
 - Do NOT call `kanban_dispatch` or any `kanban_*` tool — you are already running inside a kanban task.
-- Do NOT call `meeting_create_participants` more than once per meeting.
+- Call `meeting_create_participants` exactly once at the start of a meeting task, using the participant list from the task prompt.
+- Do NOT call `meeting_create_participants` again after a meeting is active; continue with agenda, discussion, and `meeting_conclude`.
 - Always end with `meeting_conclude` — this is your exit, do not call `respond_to_user`.
 - Keep participant `max_iterations` low (8–12) unless the task requires deep research.
 - If a participant's response is unhelpful, you may ask them again with `meeting_ask_one` providing more specific context.

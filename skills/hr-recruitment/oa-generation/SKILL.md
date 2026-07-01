@@ -1,6 +1,7 @@
 ---
 name: oa-generation
 description: 为候选人生成定制化在线编程测试（OA）题包，基于候选人 profile 和 JD 要求设计题目方案，输出完整的 OA 题包文件。
+audience: main
 ---
 
 # OA Generation (在线编程测试题包生成)
@@ -9,7 +10,7 @@ description: 为候选人生成定制化在线编程测试（OA）题包，基�
 
 当需要为候选人**生成**定制化 OA（Online Assessment）编程题包时使用。本 skill 指导 agent 如何：
 1. 分析候选人 profile 和 JD 要求，设计 OA 题目方案
-2. 生成完整的 OA 题包文件（README.md、source_materials、代码框架、schema、内部评价标准）
+2. 通过设计会议决定 OA 题包的内容框架、考题大纲、目标文件结构和交付方式
 3. 使用 Kanban 板编排多任务依赖关系
 4. **最终审查确保题包质量，并在审查中闭环修改缺陷**
 
@@ -28,24 +29,16 @@ description: 为候选人生成定制化在线编程测试（OA）题包，基�
 - JD（职位描述）已读取
 - 已了解候选人的技术栈、项目经历、竞赛背景
 
-## 目录结构约定
+## 目标产物约定
 
-所有 OA 题包文件保存在 `candidates/{候选人姓名}/OA/` 下。若该目录已存在，依次尝试 `OA_2/`、`OA_3/` …，使用第一个不存在的名称（用 `list_files` 检查）：
+不要在加载本 skill 后直接套用固定文件清单、固定代码框架或固定目录结构。OA 题包的具体文件结构、题目组织方式、材料格式、代码框架是否需要生成，都必须由前置设计会议根据候选人背景、JD 和题目方案决定。
 
-```
-candidates/{候选人姓名}/
-├── profile.json                    # Stage 1 简历数据
-├── OA/          ← 或 OA_2/、OA_3/ …（若前序已存在）
-│   ├── README.md                   # OA 任务概述（题目、要求、截止时间等）
-│   ├── CONTEXT.md                  # 公司背景、情报源描述、业务规则
-│   ├── DELIVERABLES.md             # 提交物清单
-│   ├── materials/                  # 输入材料（多源情报数据，文本量约20000字）
-│   ├── scaffold/                   # 半结构化代码框架
-│   ├── SCORING.md                  # 评分标准
-│   ├── tests/                      # 测试文件
-│   ├── INTERNAL_EVALUATION.md      # 内部评价标准（面试官手册）
-│   └── review_report.md            # 最终审查报告
-```
+默认输出根目录仍建议放在 `candidates/{候选人姓名}/OA/` 下；若该目录已存在，依次尝试 `OA_2/`、`OA_3/` …，使用第一个不存在的名称（用 `list_files` 检查）。但根目录下的具体文件和子目录由设计会议决定。
+
+无论会议决定采用什么结构，最终题包必须覆盖两类内容：
+
+1. **Candidate-facing requirement / 题面**：候选人能看到并据此完成 OA 的说明，包括题目背景、任务目标、输入/输出要求、提交要求、约束和示例等。文件名和拆分方式由会议决定。
+2. **Internal evaluation content / 内部评估材料**：面试官或评估流程使用的评分标准、参考答案或评估思路、扣分规则、面试追问建议、风险点等。文件名和拆分方式由会议决定。
 
 ## 生成流程
 
@@ -97,23 +90,17 @@ candidates/{候选人姓名}/
 | 2 | 动态泛化 | 未知维度自适应 | 不给固定维度，让候选人自主分析并设计大纲 |
 | 3 | 极限压测 | 海量异构数据流架构 | 面试讨论环节，非笔试 |
 
-#### raw material 文本量要求
+#### 输入材料设计
 
-- materials/ 目录下的输入材料总文本量需达到约 **20000 字**
-- 材料应包含多源、异构、冲突/冗余/缺失信息
-- 模拟真实业务场景中的情报分析任务
+不要预设必须存在 `materials/` 目录或固定文本量。如果题目方案需要输入材料，材料的文件结构、规模、格式、噪声设计和冲突/冗余/缺失信息比例由设计会议决定。材料应服务于题目目标，而不是为了满足固定模板。
 
 ### Step 3: 创建 Kanban 板编排任务
 
 #### 3.1 先召开 OA 题目方案设计讨论会
 
-在创建文件生成 pipeline 之前，**必须先召开设计讨论会**，确定题目方案。**选择以下一种方式，不可两种混用**：
+使用 `kanban_create_meeting_task`**
 
-> ⚠️ **严禁混用**：选了方式 A 就不要再调用 `meeting_create_participants`；选了方式 B 就不要再创建 Kanban meeting task。两种方式都执行会产生两个重复 meeting。
-
-**方式 A（推荐）：使用 `kanban_create_meeting_task`**
-
-由 worker 代替主 agent 召开会议。主 agent **不需要也不应该**直接调用任何 `meeting_*` 工具。
+由 worker 代替你召开会议。你**不需要也不应该**直接调用任何 `meeting_*` 工具。
 ```python
 kanban_create_meeting_task(
     board="oa-design-{候选人姓名}",
@@ -135,9 +122,9 @@ kanban_create_meeting_task(
 ### 需要讨论并输出的内容
 1. 题目场景设计（什么业务场景）
 2. 3道题的详细描述（名称、考察点、输入输出规范）
-3. 噪声/冲突/干扰项的设计方案（raw material 文本量需达到约20000字）
+3. 如需输入材料，讨论噪声/冲突/干扰项、材料规模、格式和组织方式
 4. 评分维度与权重
-5. 脚手架代码的故意缺陷设计
+5. 如需代码、框架、测试或 schema，讨论其必要性、目标结构和故意缺陷设计
 """,
     suggested_participants=["张工：资深AI算法面试官，擅长Agent架构设计、LLM评估",
                            "李老师：OA出题专家，擅长编程题设计、考核维度设计",
@@ -146,91 +133,55 @@ kanban_create_meeting_task(
 ```
 然后 dispatch 等待完成，读取会议结论。**dispatch 完成后直接读结论，无需再做任何 meeting 操作。**
 
-**方式 B：主 agent 直接调用 meeting 工具**
+#### 3.2 Review 会议结论并创建一次完整 Kanban pipeline
 
-如果会议比较简单，主 agent 可以直接调用 meeting 工具（**此时不要创建 kanban meeting task**）：
-```python
-meeting_create_participants(...)
-meeting_set_agenda(...)
-meeting_chain(...)  # 或 meeting_group_discuss
-meeting_conclude(...)
-```
+会议 task 完成后，你必须先 review 会议结论，而不是直接开始写文件。review 时提取：
 
-#### 3.2 创建文件生成 Kanban pipeline
+1. 题目方案和考察目标
+2. 会议建议的题包内容框架和目标文件结构
+3. candidate-facing requirement / 题面应包含的内容
+4. internal evaluation content / 内部评估材料应包含的内容
+5. 需要哪些 subagent 并行或串行生成
 
-会议确定题目方案后，使用 `kanban_create_pipeline` 创建 OA 题包生成 Kanban 板，包含以下任务：
+然后使用 `kanban_create_pipeline` 创建 OA 题包生成 Kanban 板，安排 subagents 一次完成任务。不要自己开始写具体题包内容。
 
-1. **生成 README.md** — 基于题目方案生成 OA 任务概述
-2. **生成 CONTEXT.md** — 生成公司背景和情报源描述
-3. **生成 DELIVERABLES.md** — 生成提交物清单
-4. **生成 materials/** — 生成输入材料（多源情报数据，文本量约20000字）
-5. **生成 scaffold/** — 生成半结构化代码框架
-6. **生成 SCORING.md** — 生成评分标准
-7. **生成 tests/** — 生成测试文件
-8. **生成 INTERNAL_EVALUATION.md** — 生成内部评价标准
+Kanban pipeline 的任务清单由会议结论决定，不要硬编码为固定文件名或固定目录。每个 worker task 的 prompt 必须明确：
 
-**注意**：文件生成任务如果仅需 write_file/read_file 等基础工具，可以通过 Kanban dispatch 派发给 worker 并行执行。但如果 worker 大量失败，应回退到主 agent 顺序执行（见注意事项 #10）。
+- 输出应写入哪个目标路径或目标文件集合
+- 该任务负责的是 candidate-facing 内容、internal evaluation 内容，还是两者之间的一致性检查
+- 需要遵守的题目方案、难度、JD 对齐要求和会议结论
+- 与其他任务的依赖关系
 
-### Step 4: 生成各文件
+**注意**：文件生成任务如果仅需 write_file/read_file 等基础工具，可以通过 Kanban dispatch 派发给 worker 并行执行。但如果 worker 大量失败，你可以回退到顺序执行（见注意事项 #10）。
 
-#### README.md
-OA 任务概述，包含：
-- 候选人姓名
-- OA 目的说明
-- 题目列表（含每题概述）
-- 提交要求（代码规范、截止时间等）
-- 评分说明
+### Step 4: 生成题包内容
 
-#### CONTEXT.md
-公司背景和情报源描述，包含：
-- 公司/组织背景
-- 各情报源的描述和格式
-- 业务规则和约束
+具体生成哪些文件、是否生成代码框架、材料拆成几个文件、是否需要测试或 schema，全部以设计会议结论为准。
 
-#### DELIVERABLES.md
-提交物清单，包含：
-- 必需提交文件列表
-- 格式要求
-- 提交方式
-- 提交前检查清单
+生成结果必须满足以下最低要求：
 
-#### materials/
-输入材料，包含多源情报数据文件（JSON、CSV、TXT 等格式），模拟真实场景中的多源数据。
+#### Candidate-facing requirement / 题面
 
-#### scaffold/
-半结构化代码框架，包含：
-- main.py — 主入口
-- config.py — 配置管理
-- ingestor.py — 数据读取模块
-- analyzer.py — 分析模块
-- fuser.py — 融合模块
-- reporter.py — 报告生成模块
-- llm_client.py — LLM 调用封装
-- __init__.py — 包初始化
+候选人可见内容必须足够完整，让候选人不依赖内部材料也能完成 OA。通常需要包含：
+- 题目背景和业务场景
+- 每道题的任务目标
+- 输入、输出、提交格式和约束
+- 示例或最小可验证样例
+- 完成时间、允许使用的工具/库、禁止事项
+- 候选人交付物要求
 
-每个模块包含故意设计的缺陷（如无错误处理、无重试、无格式校验等），供候选人修复。
+#### Internal evaluation content / 内部评估材料
 
-#### SCORING.md
-评分标准，包含：
+内部材料必须足够让评估者一致评分。通常需要包含：
 - 评分维度与权重
-- 各维度评分细则
-- 评分等级（Strong Pass / Pass / Review / Fail）
-- 简历夸大对照表
-- 降档与 FAIL 机制
-- 评分流程
+- 参考解法或核心评估思路
+- 扣分规则、降档规则、失败条件
+- 候选人背景与 JD 对齐点
+- 面试追问建议和风险点
 
-#### tests/
-测试文件，包含：
-- sample_output.json — 预期输出示例
-- qa_baseline.py — 自动化检查脚本
+#### 一致性检查
 
-#### INTERNAL_EVALUATION.md
-内部评价标准（面试官手册），包含：
-- 各维度评分细则
-- 扣分规则
-- 加分项
-- 结论判定标准
-- 面试追问建议
+必须安排一个 Kanban task 或最终审查步骤检查 candidate-facing 内容和 internal evaluation 内容是否一致，特别是题目目标、输入输出、评分标准、提交物要求和难度预期。
 
 ### Step 5: 最终审查 — 闭环修改流程（关键步骤）
 
@@ -238,34 +189,34 @@ OA 任务概述，包含：
 
 #### 5.1 审查方式
 
-**必须由主 agent 直接调用 meeting 工具**（而非通过 Kanban dispatch），原因：
+**必须由你直接调用 meeting 工具**（而非通过 Kanban dispatch），原因：
 - 审查会议的核心是"发现缺陷→修改→再确认"的闭环
-- 主 agent 需要在会议过程中直接修改文件（write_file/patch_file）
-- 即使 `kanban_create_meeting_task` 预注册了 meeting 工具，worker 也无法在会议中修改主 agent 工作区的文件
-- 因此审查会议必须由主 agent 亲自执行
+- 你需要在会议过程中直接修改文件（write_file/patch_file）
+- 即使 `kanban_create_meeting_task` 预注册了 meeting 工具，worker 也无法在会议中修改你的工作区文件
+- 因此审查会议必须由你亲自执行
 
 #### 5.2 审查-修改闭环流程
 
 ```
 Round 1: 专家审查
-  ├── 主 agent 调用 meeting_group_discuss 或 meeting_chain
+  ├── 你调用 meeting_group_discuss 或 meeting_chain
   ├── 各专家审查 OA 题包，提出缺陷/改进建议
-  └── 主 agent 收集所有建议，整理为"缺陷清单"
+  └── 你收集所有建议，整理为"缺陷清单"
 
-Round 2: 主 agent 修改文件（根据缺陷清单逐一修复）
+Round 2: 你修改文件（根据缺陷清单逐一修复）
   ├── 对每个缺陷，使用 write_file/patch_file 修改对应文件
   ├── 记录每次修改的内容和原因
   └── 所有修改完成后，汇总"修改记录"
 
 Round 3: 专家确认修改
-  ├── 主 agent 再次调用 meeting_ask_one 或 meeting_group_discuss
+  ├── 你再次调用 meeting_ask_one 或 meeting_group_discuss
   ├── 向专家展示修改记录，请专家确认修改是否到位
   ├── 如有专家认为修改不充分 → 返回 Round 2 继续修改
   └── 所有专家确认通过 → 进入 Round 4
 
 Round 4: 输出最终结论
-  ├── 主 agent 调用 meeting_conclude
-  ├── 输出审查报告（review_report.md），包含：
+  ├── 你调用 meeting_conclude
+  ├── 输出审查报告（文件名由目标结构决定），包含：
   │   ├── 审查概况（参与专家、审查范围）
   │   ├── 发现的缺陷清单（含严重程度）
   │   ├── 修改记录（缺陷→修改→确认）
@@ -273,13 +224,13 @@ Round 4: 输出最终结论
   └── 会议结束
 ```
 
-#### 5.3 主 agent 在会议中的角色
+#### 5.3 你在会议中的角色
 
-在审查会议中，主 agent 承担**双重角色**：
+在审查会议中，你承担**双重角色**：
 1. **会议主持人** — 调用 meeting 工具组织讨论、收集意见
 2. **执行者** — 根据专家意见直接修改文件（write_file/patch_file）
 
-**不要**在会议中创建 Kanban task 来执行修改——主 agent 自己就是执行者。
+**不要**在会议中创建 Kanban task 来执行修改——你自己就是执行者。
 
 #### 5.4 缺陷分类与处理优先级
 
@@ -291,21 +242,21 @@ Round 4: 输出最终结论
 
 #### 5.5 修改记录模板
 
-每次修改后，在 review_report.md 中记录：
+每次修改后，在审查报告中记录：
 
 ```markdown
 ### 修改记录
 
 | # | 缺陷描述 | 严重程度 | 修改文件 | 修改内容 | 确认状态 |
 |---|---------|:-------:|---------|---------|:-------:|
-| 1 | llm_client.py 缺少超时模拟 | 重要 | scaffold/llm_client.py | 增加 5% 超时/慢响应模拟 | 已确认 |
-| 2 | SCORING.md 降级定义不明确 | 重要 | SCORING.md | 补充降级处理的具体示例 | 已确认 |
+| 1 | candidate-facing 题面缺少输出格式约束 | 重要 | 会议决定的题面文件 | 补充输出格式与示例 | 已确认 |
+| 2 | internal evaluation 与题面难度描述不一致 | 重要 | 会议决定的内部评估文件 | 对齐评分标准和题目目标 | 已确认 |
 ```
 
 审查 OA 题包的质量：
-- **一致性**：README.md 中的题目描述与 source_materials.txt 一致
+- **一致性**：candidate-facing 题面与 internal evaluation 内容一致
 - **完整性**：所有文件齐全，无遗漏
-- **可运行性**：scaffold 代码的测试用例可运行
+- **可执行性**：如果会议决定生成代码、测试、schema 或数据材料，这些产物应能按题面说明使用
 - **难度匹配**：题目难度与候选人水平匹配
 - **JD 对齐**：题目覆盖 JD 要求的关键技术点
 
@@ -329,7 +280,7 @@ Round 4: 输出最终结论
 7. **可评估**：每道题有明确的评分标准
 8. **原创性**：避免直接使用 LeetCode 原题，适当改编
 9. **时间合理**：总完成时间控制在 2-3 小时内
-10. **raw material 文本量**：输入材料总文本量需达到约 20000 字
+10. **输入材料适配**：如果题目需要输入材料，其规模、格式和噪声设计应由会议根据题目目标决定
 
 ## 状态查询效率
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 from pathlib import Path
 
 from .context import compact_messages, rough_tokens
@@ -63,15 +64,6 @@ SPILL_PREVIEW_CHARS = 600
 SNAPSHOT_TOOL_NAMES = {"browser_navigate", "browser_snapshot"}
 READ_FILE_TOOL_NAMES = {"read_file"}
 NOTES_TOOL_NAME = "save_research_notes"
-NO_SPILL_TOOLS = {
-    "read_file",
-    "list_files",
-    "search_files",
-    "write_file",
-    "patch_file",
-    "terminal",
-    "run_cmd",
-}
 PREVIOUS_SNAPSHOT_LIMIT = 2_000
 PREVIOUS_READ_FILE_LIMIT = 500
 CONTINUATION_MAX_ITERS = 30
@@ -128,6 +120,8 @@ class GeneralAgent:
         session_path: str | Path | None = None,
         session_id: str | None = None,
         sub_agent: bool = False,
+        agent_role: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> None:
         ensure_project_dirs()
         load_builtin_tools()
@@ -139,6 +133,7 @@ class GeneralAgent:
         self.ui = ui or ConsoleUI(enabled=True)
         self.session_id = session_id or new_session_id()
         self._sub_agent = sub_agent
+        self.agent_role = agent_role or ("tool_subagent" if sub_agent else "main")
         self.task_id = f"task_{uuid.uuid4().hex[:8]}"
         self._spill_dir = SESSIONS_DIR / ".tool_cache" / self.session_id
         self._spill_counter = 0
@@ -153,6 +148,15 @@ class GeneralAgent:
         self._finish_tools: frozenset[str] = frozenset(finish_tools) if finish_tools else frozenset()
         self._candidate_folder = str(candidate_folder) if candidate_folder else None
         self._session_path = Path(session_path) if session_path else None
+        self._cancel_check = cancel_check
+
+    def _cancel_requested(self) -> bool:
+        if not self._cancel_check:
+            return False
+        try:
+            return bool(self._cancel_check())
+        except Exception:
+            return False
 
     def _skills_index(self) -> str:
         if "skills_list" not in self._registry.names:
@@ -163,10 +167,15 @@ class GeneralAgent:
             lines = []
             for skill in data.get("skills", []):
                 cat = f"{skill.get('category')}/" if skill.get("category") else ""
-                lines.append(f"- {cat}{skill.get('name')}: {skill.get('description')}")
+                audience = skill.get("audience")
+                audience_text = f" [audience: {audience}]" if audience else ""
+                lines.append(f"- {cat}{skill.get('name')}{audience_text}: {skill.get('description')}")
             return "\n".join(lines)
         except Exception:
             return ""
+
+    def _build_system_prompt(self) -> str:
+        return build_system_prompt(self._skills_index(), agent_role=self.agent_role)
 
     def _pre_loop_compact_review(
         self,
@@ -303,7 +312,7 @@ class GeneralAgent:
             user_message = f"{notif_text}\n\n---\n{user_message}" if user_message.strip() else notif_text
 
         messages = self._repair_tool_sequences(list(history or []))
-        system_prompt = system_prompt or build_system_prompt(self._skills_index())
+        system_prompt = system_prompt or self._build_system_prompt()
 
 
         # ── Pre-loop compact review ──────────────────────────────────────
@@ -313,7 +322,7 @@ class GeneralAgent:
             )
             if compacted is not None:
                 messages = compacted
-                system_prompt = build_system_prompt(self._skills_index())
+                system_prompt = self._build_system_prompt()
         # ─────────────────────────────────────────────────────────────────
 
         messages.append({"role": "user", "content": user_message})
@@ -329,6 +338,13 @@ class GeneralAgent:
         }
 
         for iteration in range(1, self.max_iterations + 1):
+            if self._cancel_requested():
+                final_text = "Interrupted by user. Session state was saved."
+                messages.append({"role": "assistant", "content": final_text})
+                self._write_live_cache("interrupted", messages, final_text=final_text)
+                self.ui.final()
+                break
+
             if self.auto_compact and (
                 iteration - self._last_trajectory_compress_iter >= TRAJECTORY_COMPRESS_MIN_GAP
                 and self._estimate_message_chars(messages) >= TRAJECTORY_COMPRESS_THRESHOLD
@@ -336,14 +352,14 @@ class GeneralAgent:
                 self.ui.compact(f"trajectory exceeded {TRAJECTORY_COMPRESS_THRESHOLD:,} chars")
                 messages = compact_messages(messages, self.llm, focus=user_message, protect_last=18)
                 messages = self._repair_tool_sequences(messages)
-                system_prompt = build_system_prompt(self._skills_index())
+                system_prompt = self._build_system_prompt()
                 self._last_trajectory_compress_iter = iteration
 
             if self.auto_compact and rough_tokens(messages, system_prompt) > self.context_threshold_tokens:
                 self.ui.compact("context threshold exceeded")
                 messages = compact_messages(messages, self.llm, focus=user_message)
                 messages = self._repair_tool_sequences(messages)
-                system_prompt = build_system_prompt(self._skills_index())
+                system_prompt = self._build_system_prompt()
 
             messages = self._repair_tool_sequences(messages)
             api_messages = [{"role": "system", "content": system_prompt}, *messages]
@@ -363,6 +379,12 @@ class GeneralAgent:
                 self.ui.final()
                 break
             assistant = response.choices[0].message
+            if self._cancel_requested():
+                final_text = "Interrupted by user. Session state was saved."
+                messages.append({"role": "assistant", "content": final_text})
+                self._write_live_cache("interrupted", messages, final_text=final_text)
+                self.ui.final()
+                break
             assistant_msg = {"role": "assistant", "content": assistant.content or ""}
             reasoning = _reasoning_content(assistant)
             if reasoning:
@@ -391,13 +413,20 @@ class GeneralAgent:
                     )
                     if compacted is not None:
                         messages = compacted
-                        system_prompt = build_system_prompt(self._skills_index())
+                        system_prompt = self._build_system_prompt()
                 # ──────────────────────────────────────────────────────────
 
                 compact_focus = None
                 interrupted = False
                 for index, tc in enumerate(tool_calls):
-                    if final_text:
+                    if self._cancel_requested():
+                        args = {}
+                        result = json.dumps(
+                            {"success": False, "error": "Tool skipped because the user interrupted this run."},
+                            ensure_ascii=False,
+                        )
+                        interrupted = True
+                    elif final_text:
                         args = {}
                         result = json.dumps(
                             {
@@ -436,7 +465,7 @@ class GeneralAgent:
                             self._pending_restart = runtime["_pending_restart"]
                             if runtime.get("_pending_restart_prompt"):
                                 self._pending_restart_prompt = runtime["_pending_restart_prompt"]
-                    result = self._process_tool_result(result, tc.function.name)
+                    result = self._process_tool_result(result, tc.function.name, args)
                     self.ui.tool_done(tc.function.name, result)
                     messages.append(
                         {
@@ -489,7 +518,7 @@ class GeneralAgent:
                     self.ui.compact(compact_focus)
                     messages = compact_messages(messages, self.llm, focus=compact_focus)
                     messages = self._repair_tool_sequences(messages)
-                    system_prompt = build_system_prompt(self._skills_index())
+                    system_prompt = self._build_system_prompt()
                 if final_text:
                     self.ui.final()
                     break
@@ -574,14 +603,14 @@ class GeneralAgent:
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         tmp.replace(self._live_cache_path)
 
-    def _process_tool_result(self, result: Any, tool_name: str) -> Any:
+    def _process_tool_result(self, result: Any, tool_name: str, tool_args: dict[str, Any] | None = None) -> Any:
         if not isinstance(result, str):
             return result
         result = clean_text(result)
         if len(result) <= MAX_TOOL_RESULT_CHARS:
             return result
-        if tool_name in NO_SPILL_TOOLS:
-            return result[:MAX_TOOL_RESULT_CHARS] + "\n[truncated]"
+        if tool_name in READ_FILE_TOOL_NAMES and tool_args and "max_chars" in tool_args:
+            return result
         return self._spill_tool_result(result, tool_name)
 
     def _estimate_message_chars(self, messages: list[dict[str, Any]]) -> int:
@@ -601,9 +630,14 @@ class GeneralAgent:
         path.write_text(result, encoding="utf-8")
         preview = result[:SPILL_PREVIEW_CHARS]
         return (
-            "[content too large; saved to disk]\n"
-            f"path: {path}\n"
-            "Use read_file(path) if the full content is needed.\n\n"
+            "[tool result truncated to save context]\n"
+            f"cache_path: {path}\n"
+            f"full_content: saved at {path}\n"
+            "To inspect the complete untruncated result, call read_file with this cache_path and explicit max_chars/offset chunks.\n"
+            "read_file results with explicit max_chars are not spilled again by the agent.\n"
+            "Example: read_file({\"path\": \""
+            + str(path).replace("\\", "\\\\")
+            + "\", \"max_chars\": 6000, \"offset\": 0})\n\n"
             f"--- preview ({SPILL_PREVIEW_CHARS} chars) ---\n"
             f"{preview}\n[...]"
         )
@@ -633,10 +667,18 @@ class GeneralAgent:
             msg = messages[index]
             if msg.get("role") == "tool" and msg.get("name") != NOTES_TOOL_NAME:
                 previous = str(msg.get("content", ""))
+                cache_match = re.search(r"^cache_path:\s*(.+)$", previous, re.MULTILINE)
+                cache_note = ""
+                if cache_match:
+                    cache_note = (
+                        "\n\nOriginal full tool result cache_path: "
+                        + cache_match.group(1).strip()
+                        + "\nUse read_file(path) with this cache_path if the full original result is needed."
+                    )
                 if previous.startswith("[notes saved from previous result]"):
                     content = previous + "\n\n" + notes_content
                 else:
-                    content = "[notes saved from previous result]\n" + notes_content
+                    content = "[notes saved from previous result]\n" + notes_content + cache_note
                 messages[index] = {**msg, "content": content}
                 break
 
@@ -655,6 +697,7 @@ class GeneralAgent:
                 content.startswith("[notes saved from previous result]")
                 or content.startswith("[compressed]")
                 or content.startswith("[content too large; saved to disk]")
+                or content.startswith("[tool result truncated to save context]")
             ):
                 continue
             if len(content) > PREVIOUS_READ_FILE_LIMIT:
@@ -685,7 +728,7 @@ class GeneralAgent:
 
     def _run_to_finish(self, messages: list[dict[str, Any]]) -> str:
         for iteration in range(1, CONTINUATION_MAX_ITERS + 1):
-            api_messages = [{"role": "system", "content": build_system_prompt(self._skills_index())}, *messages]
+            api_messages = [{"role": "system", "content": self._build_system_prompt()}, *messages]
             try:
                 response = self.llm.chat(api_messages, self._registry.definitions())
             except Exception as exc:
@@ -740,7 +783,7 @@ class GeneralAgent:
                     if self._finish_tools and tc.function.name in self._finish_tools and not final_text:
                         final_text = result or "Task completed."
 
-                result = self._process_tool_result(result, tc.function.name)
+                result = self._process_tool_result(result, tc.function.name, args)
                 messages.append(
                     {
                         "role": "tool",

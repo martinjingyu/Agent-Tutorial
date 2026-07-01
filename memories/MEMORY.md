@@ -81,3 +81,6 @@ OA题目方案「跨境合规情报融合引擎」已设计完成，保存在 re
 2. **不要反复读 worker 内部 session 缓存文件** — 不要用 read_file 读 kanban workers/ 下的 JSON 缓存来轮询状态。正确做法：kanban_show_task 检查状态 + kanban_notify_subscribe 订阅 pipeline_complete 事件 + respond_to_user 结束本轮，等通知触发。
 
 关联 skill: utilities/context-management 应该补充这个行为准则。
+§
+§
+用户需要的是 HTML 格式的单元音课件（可直接在浏览器打开和学生一起看），不是 Markdown。当前 pipeline 正在生成 Markdown 版本，完成后需要将其转换为 HTML。
