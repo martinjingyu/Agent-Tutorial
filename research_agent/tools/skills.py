@@ -11,6 +11,16 @@ from .registry import json_result, registry
 
 VALID_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9./._-]*$")
 ALLOWED_SUBDIRS = {"references", "templates", "scripts", "assets"}
+VALID_AUDIENCES = {
+    "main",
+    "kanban_worker",
+    "tool_subagent",
+    "meeting_moderator",
+    "participant",
+    "self_review",
+    "all",
+    "*",
+}
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -32,16 +42,54 @@ def _iter_skill_files() -> list[Path]:
 
 
 def _find_skill(name: str) -> Path | None:
+    fallback: Path | None = None
     for skill_md in _iter_skill_files():
-        if skill_md.parent.name == name:
-            return skill_md.parent
+        if fallback is None and skill_md.parent.name == name:
+            fallback = skill_md.parent
         try:
             frontmatter, _ = _parse_frontmatter(skill_md.read_text(encoding="utf-8", errors="replace"))
             if frontmatter.get("name") == name:
                 return skill_md.parent
         except OSError:
             continue
-    return None
+    return fallback
+
+
+def _audience_values(frontmatter: dict) -> set[str]:
+    audience = frontmatter.get("audience")
+    if isinstance(audience, list):
+        return {str(item).strip() for item in audience if str(item).strip()}
+    if audience:
+        return {part.strip() for part in str(audience).split(",") if part.strip()}
+    return set()
+
+
+def _skill_visible_for_role(frontmatter: dict, runtime: dict) -> bool:
+    audiences = _audience_values(frontmatter)
+    if not audiences or "all" in audiences or "*" in audiences:
+        return True
+    role = str(runtime.get("agent_role") or "main")
+    return role in audiences
+
+
+def _audience_display(frontmatter: dict) -> str | None:
+    audiences = sorted(_audience_values(frontmatter))
+    return ",".join(audiences) if audiences else None
+
+
+def _touches_main_audience(frontmatter: dict) -> bool:
+    audiences = _audience_values(frontmatter)
+    return bool(audiences & {"main", "all", "*"})
+
+
+def _can_modify_skill(frontmatter: dict, runtime: dict) -> bool:
+    role = str(runtime.get("agent_role") or "main")
+    return role == "main" or not _touches_main_audience(frontmatter)
+
+
+def _deny_modify_message(name: str, runtime: dict) -> str:
+    role = str(runtime.get("agent_role") or "main")
+    return f"agent_role '{role}' cannot modify main-audience skill: {name}"
 
 
 def _validate_skill_name(name: str) -> str | None:
@@ -60,6 +108,12 @@ def _validate_skill_content(content: str) -> str | None:
         return "SKILL.md must start with YAML frontmatter"
     if "name" not in frontmatter or "description" not in frontmatter:
         return "frontmatter must include name and description"
+    audiences = _audience_values(frontmatter)
+    if not audiences:
+        return "frontmatter must include audience; use one or more of: main, kanban_worker, tool_subagent, meeting_moderator, participant, self_review, all"
+    invalid = sorted(audiences - VALID_AUDIENCES)
+    if invalid:
+        return f"frontmatter audience contains unknown role(s): {', '.join(invalid)}"
     if not body.strip():
         return "SKILL.md body cannot be empty"
     return None
@@ -91,13 +145,9 @@ def _skills_list(args: dict, runtime: dict) -> str:
             cat = rel.parts[0] if len(rel.parts) > 1 else None
             if category and cat != category:
                 continue
-            audience = frontmatter.get("audience")
-            if isinstance(audience, list):
-                audience_value = ",".join(str(item) for item in audience)
-            elif audience:
-                audience_value = str(audience)
-            else:
-                audience_value = None
+            if not _skill_visible_for_role(frontmatter, runtime):
+                continue
+            audience_value = _audience_display(frontmatter)
             skills.append({
                 "name": name,
                 "description": description[:1024],
@@ -114,6 +164,17 @@ def _skill_view(args: dict, runtime: dict) -> str:
     skill_dir = _find_skill(name)
     if not skill_dir:
         return json_result(success=False, error=f"Skill not found: {name}")
+    skill_md = skill_dir / "SKILL.md"
+    frontmatter, _ = _parse_frontmatter(skill_md.read_text(encoding="utf-8", errors="replace"))
+    if not _skill_visible_for_role(frontmatter, runtime):
+        role = str(runtime.get("agent_role") or "main")
+        audience = _audience_display(frontmatter) or "unspecified"
+        return json_result(
+            success=False,
+            error=f"Skill not available for agent_role '{role}': {name}",
+            audience=audience,
+            agent_role=role,
+        )
     file_path = args.get("file_path")
     target = _safe_support_path(skill_dir, file_path) if file_path else skill_dir / "SKILL.md"
     if not target.exists():
@@ -140,6 +201,9 @@ def _skill_manage(args: dict, runtime: dict) -> str:
         err = _validate_skill_content(content)
         if err:
             return json_result(success=False, error=err)
+        frontmatter, _ = _parse_frontmatter(content)
+        if not _can_modify_skill(frontmatter, runtime):
+            return json_result(success=False, error=_deny_modify_message(name, runtime))
         if _find_skill(name):
             return json_result(success=False, error=f"Skill already exists: {name}")
         category = str(args.get("category") or "").strip()
@@ -151,12 +215,19 @@ def _skill_manage(args: dict, runtime: dict) -> str:
     skill_dir = _find_skill(name)
     if not skill_dir:
         return json_result(success=False, error=f"Skill not found: {name}")
+    skill_md = skill_dir / "SKILL.md"
+    existing_frontmatter, _ = _parse_frontmatter(skill_md.read_text(encoding="utf-8", errors="replace"))
+    if not _can_modify_skill(existing_frontmatter, runtime):
+        return json_result(success=False, error=_deny_modify_message(name, runtime))
 
     if action == "edit":
         content = str(args.get("content") or "")
         err = _validate_skill_content(content)
         if err:
             return json_result(success=False, error=err)
+        new_frontmatter, _ = _parse_frontmatter(content)
+        if not _can_modify_skill(new_frontmatter, runtime):
+            return json_result(success=False, error=_deny_modify_message(name, runtime))
         (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
         return json_result(success=True, message=f"Skill '{name}' updated")
 
@@ -172,7 +243,15 @@ def _skill_manage(args: dict, runtime: dict) -> str:
         replace_all = bool(args.get("replace_all"))
         if count != 1 and not replace_all:
             return json_result(success=False, error=f"Expected one match, found {count}")
-        target.write_text(text.replace(old, str(new), -1 if replace_all else 1), encoding="utf-8")
+        updated = text.replace(old, str(new), -1 if replace_all else 1)
+        if target.name == "SKILL.md":
+            err = _validate_skill_content(updated)
+            if err:
+                return json_result(success=False, error=err)
+            new_frontmatter, _ = _parse_frontmatter(updated)
+            if not _can_modify_skill(new_frontmatter, runtime):
+                return json_result(success=False, error=_deny_modify_message(name, runtime))
+        target.write_text(updated, encoding="utf-8")
         return json_result(success=True, message=f"Patched {target.name}", replacements=count if replace_all else 1)
 
     if action == "write_file":
@@ -223,6 +302,9 @@ registry.register(
     {
         "description": (
             "Create or update project-local skills, which are procedural memory for reusable task classes. "
+            "Every SKILL.md must declare frontmatter audience with valid roles: main, kanban_worker, "
+            "tool_subagent, meeting_moderator, participant, self_review, or all. "
+            "Only agent_role=main may modify skills whose audience includes main, all, or *. "
             "Prefer improving existing skills over creating new ones. Use patch for small SKILL.md changes; "
             "use edit only for major full rewrites after reading the current skill. Use write_file for "
             "supporting files under references/, templates/, scripts/, or assets/. references/ is for detailed "
@@ -250,7 +332,7 @@ registry.register(
                 },
                 "content": {
                     "type": "string",
-                    "description": "Full SKILL.md content with YAML frontmatter. Required for create/edit.",
+                    "description": "Full SKILL.md content with YAML frontmatter including name, description, and audience. Required for create/edit.",
                 },
                 "file_path": {
                     "type": "string",

@@ -63,6 +63,7 @@ MAX_TOOL_RESULT_CHARS = 8_000
 SPILL_PREVIEW_CHARS = 600
 SNAPSHOT_TOOL_NAMES = {"browser_navigate", "browser_snapshot"}
 READ_FILE_TOOL_NAMES = {"read_file"}
+RECOVERABLE_FILE_WRITE_TOOL_NAMES = {"write_file", "append_file"}
 NOTES_TOOL_NAME = "save_research_notes"
 PREVIOUS_SNAPSHOT_LIMIT = 2_000
 PREVIOUS_READ_FILE_LIMIT = 500
@@ -88,6 +89,79 @@ FINISH_REMINDER = (
     "Finish immediately using the information already gathered. If an output file "
     "is needed, write it now, then call respond_to_user."
 )
+
+
+def _decode_json_string_prefix(fragment: str) -> tuple[str | None, int]:
+    """Decode a JSON string body that may be cut off near the end."""
+    max_trim = min(len(fragment), 128)
+    for trim in range(max_trim + 1):
+        candidate = fragment if trim == 0 else fragment[:-trim]
+        try:
+            return json.loads(f'"{candidate}"'), trim
+        except json.JSONDecodeError:
+            continue
+    return None, 0
+
+
+def _extract_json_string_value(raw: str, key: str) -> tuple[str | None, bool, int]:
+    match = re.search(rf'"{re.escape(key)}"\s*:\s*"', raw)
+    if not match:
+        return None, False, 0
+
+    start = match.end()
+    escaped = False
+    for pos in range(start, len(raw)):
+        ch = raw[pos]
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch == '"':
+            value, trimmed = _decode_json_string_prefix(raw[start:pos])
+            return value, True, trimmed
+
+    value, trimmed = _decode_json_string_prefix(raw[start:])
+    return value, False, trimmed
+
+
+def _recover_file_write_args(tool_name: str, raw_args: str, exc: json.JSONDecodeError) -> dict[str, Any] | None:
+    """Recover write_file/append_file args when a long content string was truncated."""
+    if tool_name not in RECOVERABLE_FILE_WRITE_TOOL_NAMES or not raw_args:
+        return None
+
+    path, path_closed, _ = _extract_json_string_value(raw_args, "path")
+    content, content_closed, trimmed = _extract_json_string_value(raw_args, "content")
+    if not path or content is None or content == "":
+        return None
+
+    return {
+        "path": path,
+        "content": content,
+        "_recovered_truncated_tool_arguments": True,
+        "_recovery_warning": (
+            f"{tool_name} arguments were invalid/truncated at char {exc.pos}; "
+            f"recovered {len(content)} characters of content and wrote them. "
+            "Continue from the saved file tail with append_file in smaller chunks."
+        ),
+        "_content_string_closed": content_closed,
+    }
+
+
+def _add_recovery_metadata(result: str, args: dict[str, Any]) -> str:
+    if not args.get("_recovered_truncated_tool_arguments"):
+        return result
+    try:
+        data = json.loads(result)
+        if isinstance(data, dict):
+            data["recovered_truncated_arguments"] = True
+            data["content_may_be_incomplete"] = not bool(args.get("_content_string_closed"))
+            data["warning"] = "Recovered partial content from truncated file-write arguments. Continue with append_file."
+            return json.dumps(data, ensure_ascii=False)
+    except Exception:
+        pass
+    return result
 
 
 def _reasoning_content(message: Any) -> str | None:
@@ -161,7 +235,11 @@ class GeneralAgent:
     def _skills_index(self) -> str:
         if "skills_list" not in self._registry.names:
             return ""
-        result = self._registry.dispatch("skills_list", {}, {"task_id": self.task_id})
+        result = self._registry.dispatch(
+            "skills_list",
+            {},
+            {"task_id": self.task_id, "agent_role": self.agent_role},
+        )
         try:
             data = json.loads(result)
             lines = []
@@ -264,6 +342,11 @@ class GeneralAgent:
 
         Returns compacted messages if compaction is needed, None otherwise.
 
+        The last message may be the assistant message that just emitted tool_calls.
+        That message is a pending protocol boundary: it must remain verbatim and
+        must not be "repaired" with synthetic tool results before the real tools
+        execute.
+
         Compaction is triggered when:
         1. There are more than COMPACT_AFTER_FINAL_TOOL_COUNT tool results
            accumulated after the last final_response (respond_to_user).
@@ -295,6 +378,18 @@ class GeneralAgent:
             f"pre-action: {tool_count} tool results after last final_response, "
             f"{token_count}/{threshold} tokens"
         )
+        pending_tool_call_msg = (
+            messages[-1]
+            if messages
+            and messages[-1].get("role") == "assistant"
+            and messages[-1].get("tool_calls")
+            else None
+        )
+        if pending_tool_call_msg is not None:
+            prefix = self._repair_tool_sequences(messages[:-1])
+            compacted_prefix = compact_messages(prefix, self.llm, focus=user_message)
+            return self._repair_tool_sequences(compacted_prefix) + [pending_tool_call_msg]
+
         compacted = compact_messages(messages, self.llm, focus=user_message)
         return self._repair_tool_sequences(compacted)
 
@@ -333,6 +428,7 @@ class GeneralAgent:
         self._runtime: dict[str, Any] = {
             "task_id":   self.task_id,
             "session_id": self.session_id,
+            "agent_role": self.agent_role,
             "user_task": user_message,
             **({"candidate_folder": self._candidate_folder} if self._candidate_folder else {}),
         }
@@ -436,12 +532,31 @@ class GeneralAgent:
                             ensure_ascii=False,
                         )
                     else:
+                        recovered_args = False
                         try:
                             args = json.loads(tc.function.arguments or "{}")
                             if not isinstance(args, dict):
+                                self.ui.event(
+                                    "tool-args",
+                                    f"{tc.function.name} arguments were not a JSON object; using empty arguments",
+                                )
                                 args = {}
-                        except json.JSONDecodeError:
-                            args = {}
+                        except json.JSONDecodeError as exc:
+                            recovered = _recover_file_write_args(
+                                tc.function.name,
+                                tc.function.arguments or "",
+                                exc,
+                            )
+                            if recovered is not None:
+                                args = recovered
+                                recovered_args = True
+                                self.ui.event("tool-args", str(args.get("_recovery_warning")))
+                            else:
+                                self.ui.event(
+                                    "tool-args",
+                                    f"{tc.function.name} arguments JSON parse failed at char {exc.pos}: {exc.msg}",
+                                )
+                                args = {}
                         runtime = self._runtime
                         self.ui.tool_start(tc.function.name, args)
                         try:
@@ -465,6 +580,8 @@ class GeneralAgent:
                             self._pending_restart = runtime["_pending_restart"]
                             if runtime.get("_pending_restart_prompt"):
                                 self._pending_restart_prompt = runtime["_pending_restart_prompt"]
+                        if recovered_args:
+                            result = _add_recovery_metadata(result, args)
                     result = self._process_tool_result(result, tc.function.name, args)
                     self.ui.tool_done(tc.function.name, result)
                     messages.append(
@@ -760,12 +877,22 @@ class GeneralAgent:
 
             final_text = ""
             for tc in tool_calls:
+                recovered_args = False
                 try:
                     args = json.loads(tc.function.arguments or "{}")
                     if not isinstance(args, dict):
                         args = {}
-                except json.JSONDecodeError:
-                    args = {}
+                except json.JSONDecodeError as exc:
+                    recovered = _recover_file_write_args(
+                        tc.function.name,
+                        tc.function.arguments or "",
+                        exc,
+                    )
+                    if recovered is not None:
+                        args = recovered
+                        recovered_args = True
+                    else:
+                        args = {}
 
                 if tc.function.name in FINISH_BLOCKED_TOOLS:
                     result = json.dumps(
@@ -782,6 +909,8 @@ class GeneralAgent:
                         final_text = str(runtime.get("final_response") or "")
                     if self._finish_tools and tc.function.name in self._finish_tools and not final_text:
                         final_text = result or "Task completed."
+                    if recovered_args:
+                        result = _add_recovery_metadata(result, args)
 
                 result = self._process_tool_result(result, tc.function.name, args)
                 messages.append(

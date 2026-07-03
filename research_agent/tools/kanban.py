@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -112,6 +112,7 @@ def _spawn_worker(task: dict[str, Any], board: str, runtime: dict[str, Any]) -> 
         "provider": task.get("provider"),
         "model": task.get("model"),
         "max_iterations": task.get("max_iterations") or 16,
+        "auto_compact": task.get("auto_compact", True),
         "user_prompt": prompt,
         "system_prompt": "",
         "agent_role": "meeting_moderator" if str(task.get("skill") or "") == "meeting_moderator" else "kanban_worker",
@@ -180,7 +181,7 @@ def _parents_done(tasks: dict[str, dict[str, Any]], task: dict[str, Any]) -> boo
     return True
 
 
-WORKER_TIMEOUT_SECONDS = 2700  # 45 min hard kill: 120s LLM timeout × 16 iter × 1.4 buffer
+WORKER_TIMEOUT_SECONDS = 2700  # 45 min hard kill: 120s LLM timeout 脳 16 iter 脳 1.4 buffer
 
 
 def _kill_pid(pid: int) -> None:
@@ -234,7 +235,7 @@ def _sync_running(data: dict[str, Any]) -> list[dict[str, Any]]:
             updates.append({"task_id": task["id"], "status": "cancelled", "error": task["error"]})
             _event(data, "task_cancelled", task_id=task["id"], error=task["error"])
         else:
-            # Check for hung worker: started_at too long ago → kill and mark error
+            # Check for hung worker: started_at too long ago 鈫?kill and mark error
             started = task.get("started_at") or cached.get("started_at")
             if started:
                 try:
@@ -267,6 +268,7 @@ def _create_task(
     provider: str | None = None,
     model: str | None = None,
     extra_tools: list[str] | None = None,
+    auto_compact: bool | None = None,
 ) -> dict[str, Any]:
     task = {
         "id": _task_id(),
@@ -282,6 +284,7 @@ def _create_task(
         "provider": provider,
         "model": model,
         "extra_tools": extra_tools or [],
+        "auto_compact": True if auto_compact is None else bool(auto_compact),
     }
     data.setdefault("tasks", {})[task["id"]] = task
     _event(data, "task_created", task_id=task["id"], title=title, status=status, parents=task["parents"])
@@ -306,6 +309,7 @@ def _handle_create_task(args: dict, runtime: dict) -> str:
         max_iterations=args.get("max_iterations"),
         provider=args.get("provider"),
         model=args.get("model"),
+        auto_compact=args.get("auto_compact"),
     )
     _save_board(data, board_name)
     return json_result(success=True, board=board_name, task=task, board_path=str(_board_path(board_name)))
@@ -349,6 +353,7 @@ def _handle_create_pipeline(args: dict, runtime: dict) -> str:
             max_iterations=raw.get("max_iterations") or args.get("max_iterations"),
             provider=raw.get("provider") or args.get("provider"),
             model=raw.get("model") or args.get("model"),
+            auto_compact=raw.get("auto_compact", args.get("auto_compact")),
         )
         alias = raw.get("id") or raw.get("alias")
         if alias:
@@ -366,7 +371,7 @@ def _handle_create_pipeline(args: dict, runtime: dict) -> str:
         board_path=str(_board_path(board_name)),
         next_step=(
             "Call kanban_dispatch once to start workers, then call respond_to_user to end this turn. "
-            "DO NOT call kanban_dispatch repeatedly — workers run in the background."
+            "DO NOT call kanban_dispatch repeatedly 鈥?workers run in the background."
         ),
     )
 
@@ -406,6 +411,7 @@ def _handle_create_cv_pipeline(args: dict, runtime: dict) -> str:
             max_iterations=max_iterations,
             provider=args.get("provider"),
             model=args.get("model"),
+            auto_compact=args.get("auto_compact"),
             metadata={"kind": "cv_pipeline", "stage": stage, "workspace": workspace, "batch": True, "command": cmd},
         ))
     else:
@@ -424,6 +430,7 @@ def _handle_create_cv_pipeline(args: dict, runtime: dict) -> str:
                 max_iterations=max_iterations,
                 provider=args.get("provider"),
                 model=args.get("model"),
+                auto_compact=args.get("auto_compact"),
                 metadata={"kind": "cv_pipeline", "stage": stage, "workspace": workspace, "candidate": candidate, "command": cmd},
             )
             created.append(task)
@@ -438,7 +445,7 @@ def _handle_create_cv_pipeline(args: dict, runtime: dict) -> str:
         board_path=str(_board_path(board_name)),
         next_step=(
             "Call kanban_dispatch once to start workers, then call respond_to_user to end this turn. "
-            "DO NOT call kanban_dispatch repeatedly — workers run in the background."
+            "DO NOT call kanban_dispatch repeatedly 鈥?workers run in the background."
         ),
     )
 
@@ -470,7 +477,7 @@ def _polling_hint(tasks: list[dict]) -> str:
     if running:
         return (
             f"{running} task(s) still running. "
-            "DO NOT call kanban_list_tasks or kanban_show_task again to poll — "
+            "DO NOT call kanban_list_tasks or kanban_show_task again to poll 鈥?"
             "workers advance the board automatically. "
             "Use kanban_notify_subscribe then respond_to_user, "
             "or kanban_wait_complete, to handle completion."
@@ -761,7 +768,7 @@ def _handle_dispatch(args: dict, runtime: dict) -> str:
     running = [t["id"] for t in tasks.values() if t.get("status") == "running"]
     if running or remaining_ready:
         hint = (
-            f"Workers running in background — running={len(running)}, ready={len(remaining_ready)}. "
+            f"Workers running in background 鈥?running={len(running)}, ready={len(remaining_ready)}. "
             "DO NOT call kanban_dispatch again. "
             "Call respond_to_user to end this turn; the user will resume when ready."
         )
@@ -817,7 +824,8 @@ def _handle_create_meeting_task(args: dict, runtime: dict) -> str:
         max_iterations=args.get("max_iterations") or 30,
         provider=args.get("provider"),
         model=args.get("model"),
-        extra_tools=["meeting"],   # always included — moderator needs meeting tools
+        auto_compact=args.get("auto_compact"),
+        extra_tools=["meeting"],   # always included 鈥?moderator needs meeting tools
     )
     _save_board(data, board_name)
     return json_result(
@@ -836,7 +844,7 @@ registry.register("kanban_create_meeting_task", {
     "description": (
         "Create a kanban task that runs a meeting moderator agent. "
         "The moderator decides the discussion format dynamically (ask_one / chain / group_discuss). "
-        "You only need to specify the topic and optionally suggest participants — "
+        "You only need to specify the topic and optionally suggest participants 鈥?"
         "the moderator handles everything else. Meeting tools are enabled automatically."
     ),
     "parameters": {
@@ -853,6 +861,11 @@ registry.register("kanban_create_meeting_task", {
             "parents":        {"type": "array", "items": {"type": "string"}, "description": "Task IDs this meeting depends on"},
             "status":         {"type": "string", "enum": ["ready", "todo", "blocked"], "default": "ready"},
             "max_iterations": {"type": "integer", "default": 30},
+            "auto_compact": {
+                "type": "boolean",
+                "default": True,
+                "description": "Whether the moderator worker may auto-compact its context.",
+            },
             "provider":       {"type": "string"},
             "model":          {"type": "string"},
         },
@@ -875,6 +888,11 @@ registry.register("kanban_create_task", {
             "status": {"type": "string", "enum": ["ready", "todo", "blocked"], "default": "ready"},
             "metadata": {"type": "object"},
             "max_iterations": {"type": "integer", "default": 16},
+            "auto_compact": {
+                "type": "boolean",
+                "default": True,
+                "description": "Whether the worker may auto-compact its context. Keep true by default; set false for long writer/generator tasks.",
+            },
             "provider": {"type": "string", "enum": ["deepseek", "codex", "openai"]},
             "model": {"type": "string"},
         },
@@ -895,6 +913,11 @@ registry.register("kanban_create_pipeline", {
             "sequential": {"type": "boolean", "default": False, "description": "If true, each task depends on the previous task unless it already has parents/depends_on."},
             "default_skill": {"type": "string", "description": "Optional skill applied to tasks that do not specify their own skill."},
             "max_iterations": {"type": "integer", "default": 16},
+            "auto_compact": {
+                "type": "boolean",
+                "default": True,
+                "description": "Default auto_compact setting for tasks that do not specify their own value.",
+            },
             "provider": {"type": "string", "enum": ["deepseek", "codex", "openai"]},
             "model": {"type": "string"},
             "tasks": {
@@ -913,6 +936,10 @@ registry.register("kanban_create_pipeline", {
                         "status": {"type": "string", "enum": ["ready", "todo", "blocked"], "default": "ready"},
                         "metadata": {"type": "object"},
                         "max_iterations": {"type": "integer"},
+                        "auto_compact": {
+                            "type": "boolean",
+                            "description": "Whether this worker may auto-compact its context. Set false for long writer/generator tasks.",
+                        },
                         "provider": {"type": "string", "enum": ["deepseek", "codex", "openai"]},
                         "model": {"type": "string"},
                     },
@@ -996,7 +1023,7 @@ registry.register("kanban_retry_task", {
 }, _handle_retry_task)
 
 def _handle_wait_complete(args: dict, runtime: dict) -> str:
-    """Blocking wait — polls until all board tasks reach a terminal state.
+    """Blocking wait 鈥?polls until all board tasks reach a terminal state.
 
     No LLM calls are made during the wait.  Intended for non-interactive
     contexts (subprocesses, batch pipelines) where blocking is acceptable.
@@ -1039,7 +1066,7 @@ def _handle_wait_complete(args: dict, runtime: dict) -> str:
 
     return json_result(
         success=False, error="timeout", board=board_name,
-        hint="Pipeline timed out — some tasks may still be running.",
+        hint="Pipeline timed out 鈥?some tasks may still be running.",
     )
 
 
@@ -1047,7 +1074,7 @@ def register_kanban_wait_complete() -> None:
     """Opt-in: register the blocking kanban_wait_complete tool.
 
     Call this once at startup in non-interactive contexts (e.g. ScreeningPipeline).
-    Do NOT call in interactive CLI agents — use kanban_notify_subscribe instead.
+    Do NOT call in interactive CLI agents 鈥?use kanban_notify_subscribe instead.
     """
     registry.register(
         "kanban_wait_complete",
@@ -1163,7 +1190,7 @@ def fire_notifications(board_name: str, data: dict[str, Any]) -> None:
         sub_file.unlink(missing_ok=True)
 
         sys.stdout.write(
-            f"\n[kanban] Board '{board_name}' complete — "
+            f"\n[kanban] Board '{board_name}' complete 鈥?"
             f"done={n_done}, error={n_error}. Resume your agent to review.\n"
         )
         sys.stdout.flush()
@@ -1254,3 +1281,4 @@ registry.register("kanban_dispatch", {
         "required": [],
     },
 }, _handle_dispatch)
+

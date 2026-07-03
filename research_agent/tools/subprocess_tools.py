@@ -62,6 +62,7 @@ def _start(kind: str, args: dict, runtime: dict) -> str:
         "provider": args.get("provider"),
         "model": args.get("model"),
         "max_iterations": args.get("max_iterations"),
+        "auto_compact": args.get("auto_compact", True),
         "user_prompt": args.get("user_prompt") or args.get("prompt") or "",
         "system_prompt": "",
         "agent_role": "tool_subagent",
@@ -100,6 +101,11 @@ registry.register("tool_subagent", {
         "properties": {
             "user_prompt": {"type": "string"},
             "max_iterations": {"type": "integer", "default": 12},
+            "auto_compact": {
+                "type": "boolean",
+                "default": True,
+                "description": "Whether the subagent may auto-compact its context. Keep true by default; set false for writer/generator tasks where exact in-progress context matters.",
+            },
             "provider": {"type": "string", "enum": ["deepseek", "codex", "openai"]},
             "model": {"type": "string"},
         },

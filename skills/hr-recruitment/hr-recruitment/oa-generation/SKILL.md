@@ -1,6 +1,7 @@
 ---
 name: hr-recruitment/oa-generation
 description: 为候选人生成定制化在线编程测试（OA）题包，基于候选人 profile 和 JD 要求设计题目方案，输出完整的 OA 题包文件。
+audience: main
 ---
 
 # OA Generation Skill

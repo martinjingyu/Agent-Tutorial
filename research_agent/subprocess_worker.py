@@ -119,6 +119,7 @@ def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:
     prompt = str(payload.get("user_prompt") or "")
     _load_extra_tools(payload.get("extra_tools") or [])
     agent_role = str(payload.get("agent_role") or "tool_subagent")
+    auto_compact = bool(payload.get("auto_compact", True))
     registry = None
     if agent_role == "tool_subagent":
         from .tools import load_builtin_tools, registry as global_registry
@@ -132,6 +133,7 @@ def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:
         sub_agent=True,
         agent_role=agent_role,
         registry=registry,
+        auto_compact=auto_compact,
         ui=ConsoleUI(enabled=False),
         live_cache_path=cache_path,
         live_cache_metadata={
@@ -139,6 +141,7 @@ def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:
             "parent_session_id": payload.get("parent_session_id"),
             "parent_task_id": payload.get("parent_task_id"),
             "user_prompt": prompt,
+            "auto_compact": auto_compact,
             "started_at": payload.get("started_at"),
         },
     )
@@ -153,6 +156,7 @@ def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:
         "session_id": result.get("session_id"),
         "session_path": result.get("session_path"),
         "user_prompt": prompt,
+        "auto_compact": auto_compact,
         "final": result.get("final", ""),
         "messages": result.get("messages", []),
     }

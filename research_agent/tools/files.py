@@ -94,9 +94,42 @@ def _write_file(args: dict, runtime: dict) -> str:
     content = args.get("content")
     if content is None:
         return json_result(success=False, error="content is required")
+    if str(content) == "" and not args.get("allow_empty"):
+        return json_result(
+            success=False,
+            error=(
+                "content is empty. If this is a large generated document, generate and write it "
+                "in smaller chunks with write_file for the first chunk and append_file for the rest."
+            ),
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(str(content), encoding="utf-8")
     return json_result(success=True, path=str(path), bytes=len(str(content).encode("utf-8")))
+
+
+def _append_file(args: dict, runtime: dict) -> str:
+    path = resolve_workspace_path(args.get("path"))
+    content = args.get("content")
+    if content is None:
+        return json_result(success=False, error="content is required")
+    if str(content) == "" and not args.get("allow_empty"):
+        return json_result(
+            success=False,
+            error=(
+                "content is empty. Large append operations should be split into smaller chunks; "
+                "do not retry the same empty append."
+            ),
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = str(content)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(text)
+    return json_result(
+        success=True,
+        path=str(path),
+        bytes=len(text.encode("utf-8")),
+        total_bytes=path.stat().st_size,
+    )
 
 
 def _list_files(args: dict, runtime: dict) -> str:
@@ -320,14 +353,51 @@ registry.register(
 registry.register(
     "write_file",
     {
-        "description": "Write a UTF-8 text file inside the Code workspace. Use this to save reports or update project files.",
+        "description": (
+            "Write a UTF-8 text file inside the Code workspace. Use this for small/medium complete files. "
+            "For large generated files, write in chunks under roughly 8,000-12,000 characters: "
+            "use write_file for the first chunk and append_file for subsequent chunks so progress is visible "
+            "and tool arguments stay below model output limits. Empty content is rejected unless allow_empty=true."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+                "allow_empty": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Set true only when intentionally creating an empty file.",
+                },
+            },
             "required": ["path", "content"],
         },
     },
     _write_file,
+)
+registry.register(
+    "append_file",
+    {
+        "description": (
+            "Append UTF-8 text to an existing or new workspace file. For large generated files, "
+            "use write_file for the first chunk and append_file for subsequent chunks. Keep each chunk "
+            "under roughly 8,000-12,000 characters. Empty content is rejected unless allow_empty=true."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+                "allow_empty": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Set true only when intentionally appending nothing.",
+                },
+            },
+            "required": ["path", "content"],
+        },
+    },
+    _append_file,
 )
 registry.register(
     "list_files",
@@ -482,4 +552,3 @@ registry.register(
     },
     _read_url_pdf,
 )
-
