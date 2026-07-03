@@ -86,3 +86,24 @@ OA题目方案「跨境合规情报融合引擎」已设计完成，保存在 re
 用户需要的是 HTML 格式的单元音课件（可直接在浏览器打开和学生一起看），不是 Markdown。当前 pipeline 正在生成 Markdown 版本，完成后需要将其转换为 HTML。
 §
 OA 题目输入数据量要求：10w+ 字（不是 2w），用于 7.2-HJY 的 OA 设计。
+§
+## Agent Code-Aware Training 会议结论 (2026-07-03)
+
+**Core idea**: 让 LLM Agent 把自己的完整源代码（运行逻辑、tool 实现、prompt 结构）作为 training data 进行训练，让 agent 真正理解自己的运行机制。
+
+**Novelty gap confirmed**: 没有现有工作直接把 agent 的固定 codebase 作为训练数据。最接近的是 CodeRL（生成的代码）和 ToolLLM（API 日志）。
+
+**推荐技术路线 — 三阶段方案 J**:
+1. Codebase SFT (2-3 hrs, LoRA rank=32 on Qwen2.5-7B) — 静态代码理解
+2. Execution Trace SFT (3-4 hrs) — 动态行为理解
+3. GRPO with Execution Reward (1-2 days) — tool 调用优化
+
+**4×A100 可行**: 含准备期约 7-10 天，后续迭代 2-3 天一轮。
+
+**Benchmarks**: SWE-bench Lite + Verified (主), 自建 CUB (诊断), MINT + CRUXEval (附加)
+
+**与 Ctrl-Agent 的关系**: 互补。Ctrl-Agent = 推理时轨迹控制（外部），本工作 = 训练时自我理解（内部）。本工作是 Ctrl-Agent 框架中 training-time self-understanding 维度的第一个实例化。
+
+**Target venue**: NeurIPS 2026 (primary) → ICML 2027 (backup)
+
+**Full report**: reports/agent-code-aware-training-meeting-conclusion.md

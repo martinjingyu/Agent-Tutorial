@@ -18,6 +18,7 @@ Context design:
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import json
 import uuid
 from datetime import datetime
@@ -427,8 +428,15 @@ def _handle_group_discuss(args: dict, runtime: dict) -> str:
                 data["participants"][name]["session_id"] = p["session_id"]
             return {"speaker": name, "content": response, "round": round_num}
 
+        # ThreadPoolExecutor workers do NOT inherit the calling thread's contextvars
+        # (unlike asyncio tasks). agent_browser binds the active browser session to a
+        # ContextVar, so without this, each participant thread would see no session and
+        # silently open a brand-new browser tab instead of the moderator's. Capturing the
+        # context here and running workers inside it makes participants share the same
+        # browser session as the moderator/main agent.
+        ctx = contextvars.copy_context()
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(participants)) as ex:
-            futures = {ex.submit(_run_one, name): name for name in participants}
+            futures = {ex.submit(ctx.run, _run_one, name): name for name in participants}
             round_responses_unordered = [f.result() for f in concurrent.futures.as_completed(futures)]
 
         # Restore the declared participant order
