@@ -229,15 +229,23 @@ def main() -> int:
         else:
             raise ValueError(f"Unknown subprocess kind: {payload.get('kind')}")
     except Exception as exc:
+        # The agent's own top-level loop only retries transient API errors a couple of
+        # times before re-raising (see LLMClient.chat / GeneralAgent.run). If that happens
+        # here, this task cannot make further progress on its own - mark it blocked (not a
+        # code bug, just "needs a human/main-agent decision") and, critically, still run
+        # _auto_advance so the board gets synced and any pending notification actually
+        # fires. Without this, a crash here would leave the board stuck on "running"
+        # forever, since _auto_advance is normally only called from the success path.
         _write_cache(
             cache_path,
             {
                 **payload,
-                "status": "error",
+                "status": "blocked",
                 "error": f"{type(exc).__name__}: {exc}",
                 "completed_at": _now(),
             },
         )
+        _auto_advance(payload)
         return 1
     return 0
 

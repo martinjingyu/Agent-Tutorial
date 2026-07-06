@@ -149,6 +149,10 @@ def _build_participant_message(
 
 # ── Participant runner ────────────────────────────────────────────────────────
 
+_PARTICIPANT_MAX_RETRIES = 2
+_PARTICIPANT_RETRY_BASE_DELAY = 8.0
+
+
 def _run_participant(
     participant: dict[str, Any],
     user_message: str,
@@ -162,39 +166,68 @@ def _run_participant(
       - This keeps the participant's context window coherent across rounds without noise.
 
     Restricted registry: no file writing, no shell, no spawning.
+
+    Fault isolation: GeneralAgent.run() only catches KeyboardInterrupt internally, so an
+    exhausted-retry API error (timeout, connection drop, 5xx) raises all the way out of
+    agent.run(). Since a meeting nests moderator -> meeting_ask_one/chain/group_discuss ->
+    participant agent, letting that propagate would crash the entire meeting (and, via
+    ThreadPoolExecutor.result() in group_discuss, take down every other participant in the
+    same round too). A flaky participant call must degrade to a tagged error string instead.
     """
     from ..agent import GeneralAgent
     from ..ui import ConsoleUI
+    import time as _time
 
     participant_registry: ToolRegistry = registry.without(_PARTICIPANT_EXCLUDED)
 
     # session_history contains only clean user/assistant pairs from prior rounds
     history = participant.get("session_history") or []
 
-    agent = GeneralAgent(
-        model=participant.get("model"),
-        provider=participant.get("provider"),
-        max_iterations=int(participant.get("max_iterations") or 8),
-        self_review=False,
-        registry=participant_registry,
-        ui=ConsoleUI(enabled=False, label=participant["name"]),
-        sub_agent=True,
-        agent_role="participant",
-    )
-    result = agent.run(
-        user_message,
-        history=history,
-        system_prompt=participant.get("system_prompt"),
-    )
-    final = result.get("final") or ""
+    final = ""
+    for attempt in range(_PARTICIPANT_MAX_RETRIES + 1):
+        agent = GeneralAgent(
+            model=participant.get("model"),
+            provider=participant.get("provider"),
+            max_iterations=int(participant.get("max_iterations") or 8),
+            self_review=False,
+            registry=participant_registry,
+            ui=ConsoleUI(enabled=False, label=participant["name"]),
+            sub_agent=True,
+            agent_role="participant",
+        )
+        try:
+            result = agent.run(
+                user_message,
+                history=history,
+                system_prompt=participant.get("system_prompt"),
+            )
+        except Exception as exc:
+            if attempt < _PARTICIPANT_MAX_RETRIES:
+                delay = _PARTICIPANT_RETRY_BASE_DELAY * (attempt + 1)
+                print(
+                    f"[meeting] participant '{participant.get('name')}' turn failed "
+                    f"({type(exc).__name__}), retry {attempt + 1}/{_PARTICIPANT_MAX_RETRIES} in {delay:.0f}s…",
+                    flush=True,
+                )
+                _time.sleep(delay)
+                continue
+            final = (
+                f"[PARTICIPANT ERROR: {participant.get('name')} could not complete this turn after "
+                f"{_PARTICIPANT_MAX_RETRIES + 1} attempts due to repeated API failures "
+                f"({type(exc).__name__}: {exc}). Treat this as a missing response for this round."
+            )
+            break
+        else:
+            final = result.get("final") or ""
+            if result.get("session_id"):
+                participant["session_id"] = result["session_id"]
+            break
 
     # Append ONLY the clean input/output pair — no intermediate tool calls
     participant["session_history"] = history + [
         {"role": "user",      "content": user_message},
         {"role": "assistant", "content": final},
     ]
-    if result.get("session_id"):
-        participant["session_id"] = result["session_id"]
 
     return final
 

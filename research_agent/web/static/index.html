@@ -1081,16 +1081,25 @@ async function refreshWorkerModal() {
     if (titleEl) titleEl.textContent = title;
     if (metaEl) metaEl.textContent = `${status} · ${taskId}`;
     const messages = (data.messages || []).filter(m => m.role !== 'system');
+    let newHtml;
     if (messages.length) {
-      body.innerHTML = messages.map((m, i) => renderChatMessage(m, i)).join('');
+      newHtml = messages.map((m, i) => renderChatMessage(m, i)).join('');
     } else if (data.final) {
-      body.innerHTML = `<div class="chat-msg bot-msg">${esc(data.final)}</div>`;
+      newHtml = `<div class="chat-msg bot-msg">${esc(data.final)}</div>`;
     } else if (data.error) {
-      body.innerHTML = `<div class="chat-msg sys-msg">worker error: ${esc(data.error)}</div>`;
+      newHtml = `<div class="chat-msg sys-msg">worker error: ${esc(data.error)}</div>`;
     } else {
-      body.innerHTML = '<div class="stream-log"><div class="stream-sys">worker has not emitted actions yet</div></div>';
+      newHtml = '<div class="stream-log"><div class="stream-sys">worker has not emitted actions yet</div></div>';
     }
-    body.scrollTop = body.scrollHeight;
+    // Only replace content and re-anchor scroll when something actually changed —
+    // otherwise a no-op refresh (or one that arrives while the user has scrolled up
+    // to read earlier content) would yank the view back down every 1.5s.
+    if (newHtml === body.dataset.lastHtml) return;
+    const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+    const isFirstLoad = !body.dataset.lastHtml;
+    body.dataset.lastHtml = newHtml;
+    body.innerHTML = newHtml;
+    if (isFirstLoad || wasAtBottom) body.scrollTop = body.scrollHeight;
     if (!['queued', 'running'].includes(status) && _workerModalTimer) {
       clearInterval(_workerModalTimer);
       _workerModalTimer = null;
