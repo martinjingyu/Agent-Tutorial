@@ -30,7 +30,6 @@ _TOOL_SUBAGENT_EXCLUDED = {
     "kanban_retry_task",
     "kanban_dispatch",
     "kanban_notify_subscribe",
-    "kanban_wait_complete",
     "kanban_create_pipeline",
     "kanban_create_meeting_task",
     "kanban_list_boards",
@@ -45,7 +44,25 @@ def _write_cache(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    tmp.replace(path)
+    # Windows: retry rename with backoff to handle transient lock contention
+    for attempt in range(5):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if attempt < 4:
+                time.sleep(0.1 * (attempt + 1))
+                continue
+            # Last resort: write directly (non-atomic but better than losing data)
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return
 
 
 def _process_exists(pid: int) -> bool:
@@ -110,9 +127,6 @@ def _load_extra_tools(extra_tools: list[str]) -> None:
         if name == "meeting":
             from .tools.meeting import register_moderator_tools
             register_moderator_tools()
-        elif name == "kanban_wait":
-            from .tools.kanban import register_kanban_wait_complete
-            register_kanban_wait_complete()
 
 
 def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:

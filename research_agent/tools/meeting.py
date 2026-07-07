@@ -43,7 +43,7 @@ _MEETING_TOOL_NAMES = {
 }
 _KANBAN_TOOL_NAMES = {
     "kanban_create_task", "kanban_list_tasks", "kanban_update_task",
-    "kanban_dispatch", "kanban_notify_subscribe", "kanban_wait_complete",
+    "kanban_dispatch", "kanban_notify_subscribe",
     "kanban_create_pipeline", "kanban_create_meeting_task",
 }
 # Participants must NOT write files, run shell, spawn sub-agents, or touch memory/kanban

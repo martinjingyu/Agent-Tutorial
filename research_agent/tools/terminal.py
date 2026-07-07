@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+import locale
 import os
 import re
 import subprocess
 
 from ..safety import build_subprocess_env, check_command, resolve_workspace_path
 from .registry import json_result, registry
+
+
+def _console_encoding() -> str:
+    """Encoding the spawned cmd.exe actually writes with (the *active* console
+    output codepage it inherits, not the system's static OEM default -- these
+    differ whenever the terminal has switched to UTF-8, e.g. via `chcp 65001`
+    or modern terminals/PowerShell that default to it)."""
+    if os.name != "nt":
+        return "utf-8"
+    try:
+        import ctypes
+
+        cp = ctypes.windll.kernel32.GetConsoleOutputCP()
+        if cp:
+            return f"cp{cp}"
+        return f"cp{ctypes.windll.kernel32.GetOEMCP()}"
+    except Exception:
+        return locale.getpreferredencoding(False)
 
 def _normalize_windows_cmd(cmd: str) -> str:
     cmd = re.sub(r'\bmkdir\s+-p\s+', 'mkdir ', cmd)
@@ -50,7 +69,7 @@ def _execute_command(args: dict, runtime: dict, *, workdir_key: str = "workdir",
             capture_output=True,
             text=True,
             timeout=timeout,
-            encoding='utf-8',
+            encoding=_console_encoding(),
             errors='replace',
             env=build_subprocess_env(),
         )
@@ -80,7 +99,11 @@ registry.register(
             "This project runs on Windows with cmd.exe shell semantics; prefer Windows commands "
             "(dir, type, copy, move, mkdir, rmdir /s /q, del /f /q) or explicit powershell -Command. "
             "Do not use Unix-only flags such as mkdir -p, cp -r, rm -rf, grep, sed, or head unless you "
-            "know they are available. Common Unix commands are normalized on Windows when possible."
+            "know they are available. Common Unix commands are normalized on Windows when possible. "
+            "Caution: on Windows, if this command times out, the underlying process may keep "
+            "running invisibly in the background rather than actually stopping -- for anything "
+            "that might take more than ~30-60 seconds, use run_background + wait_for_background "
+            "instead, which track the process honestly instead of guessing from a timeout."
         ),
         "parameters": {
             "type": "object",

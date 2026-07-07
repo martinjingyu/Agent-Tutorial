@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .context import compact_messages, rough_tokens
 from .llm import LLMClient
-from .paths import SESSIONS_DIR, ensure_project_dirs
+from .paths import SESSIONS_DIR, ensure_project_dirs, set_workspace_root
 from .prompts import build_system_prompt
 from .self_review import trigger_self_review
 from .state import new_session_id, save_session
@@ -21,12 +21,20 @@ from .ui import ConsoleUI
 
 
 def _consume_notifications() -> list[dict]:
-    """Safely consume pending kanban notifications (no-op if kanban not loaded)."""
+    """Safely consume pending kanban and background-job notifications (no-op
+    for whichever of those isn't loaded)."""
+    messages: list[dict] = []
     try:
         from .tools.kanban import consume_pending_notifications
-        return consume_pending_notifications()
+        messages.extend(consume_pending_notifications())
     except Exception:
-        return []
+        pass
+    try:
+        from .tools.background import consume_pending_background_notifications
+        messages.extend(consume_pending_background_notifications())
+    except Exception:
+        pass
+    return messages
 
 
 COMPACT_AFTER_FINAL_TOOL_COUNT = 8
@@ -196,7 +204,10 @@ class GeneralAgent:
         sub_agent: bool = False,
         agent_role: str | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        workspace_root: str | Path | None = None,
     ) -> None:
+        if workspace_root is not None:
+            set_workspace_root(workspace_root)
         ensure_project_dirs()
         load_builtin_tools()
         self.llm = LLMClient(model=model, provider=provider)
@@ -717,8 +728,24 @@ class GeneralAgent:
             payload["session_path"] = session_path
         self._live_cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._live_cache_path.with_suffix(self._live_cache_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        tmp.replace(self._live_cache_path)
+        body = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+        tmp.write_text(body, encoding="utf-8")
+        # Windows readers can briefly lock the live cache while dashboards or
+        # kanban sync inspect it. Retry the atomic replace before falling back.
+        for attempt in range(5):
+            try:
+                tmp.replace(self._live_cache_path)
+                return
+            except PermissionError:
+                if attempt < 4:
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                self._live_cache_path.write_text(body, encoding="utf-8")
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return
 
     def _process_tool_result(self, result: Any, tool_name: str, tool_args: dict[str, Any] | None = None) -> Any:
         if not isinstance(result, str):

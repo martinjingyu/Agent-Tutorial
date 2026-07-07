@@ -245,7 +245,6 @@ class LLMClient:
             "messages": messages,
             "tools": tools or None,
             "tool_choice": "auto" if tools else None,
-            "temperature": float(get_env("AGENT_TEMPERATURE", "0.2")),
         }
         if self.provider == "deepseek":
             extra_body = _deepseek_extra_body()
@@ -264,7 +263,7 @@ class LLMClient:
                 else:
                     raise
 
-    def complete_text(self, prompt: str, *, temperature: float = 0.2) -> str:
+    def complete_text(self, prompt: str) -> str:
         if self.provider == "codex":
             model = get_env("CODEX_COMPACTION_MODEL") or get_env("COMPACTION_MODEL") or self.model
             return self._codex_complete(prompt, model=model)
@@ -272,7 +271,6 @@ class LLMClient:
         kwargs: dict[str, Any] = {
             "model": get_env("COMPACTION_MODEL", self.model),
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
         }
         if self.provider == "deepseek":
             extra_body = _deepseek_extra_body()

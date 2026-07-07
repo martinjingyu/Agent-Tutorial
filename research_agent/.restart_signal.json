@@ -1,9 +1,9 @@
 {
   "changes": [
-    "修复 skill_manage 的 name 校验正则：VALID_NAME_RE 增加斜杠 / 支持，使 hr-recruitment/oa-generation 这类带 category 前缀的 skill name 能通过校验"
+    "Fixed _write_cache in subprocess_worker.py: added retry with backoff (5 attempts) for PermissionError on Windows tmp.replace(), with fallback to direct write. This prevents Kanban workers from failing with 'PermissionError: [WinError 5] 拒绝访问' when the cache file is temporarily locked by another process."
   ],
-  "session_id": "20260630_101813",
-  "resume_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\20260630_101813.json",
-  "next_prompt": null,
-  "timestamp": "2026-06-30T11:06:11"
+  "session_id": "20260707_123228",
+  "resume_path": "C:\\Users\\LX034\\Code\\Agent-Tutorial\\sessions\\20260707_123228.json",
+  "next_prompt": "继续处理 research pipeline。之前的 pipeline (board: research-novel-practical-and-promising-research-direction-6bf1) 因为 PermissionError 失败了。我已经修复了 subprocess_worker.py 中的 _write_cache 函数，增加了 Windows 文件写入的重试机制。现在需要重新启动 pipeline：先检查旧 board 状态，清理失败的 task，然后重新创建并 dispatch 一个新的 research ideation pipeline，topic 是 brainstorm novel/practical/promising research directions in LLM agent systems for NeurIPS/ICML/ICLR 2027。之前的 8 个具体 proposals（工具内化、BREAM、GLiPT、Tool-as-Parameter、Code-Aware Training、Ctrl-Agent、DAMARL、Disentangled Training）的具体方案不够 practical，但 broader directions 不排除。没有 compute 约束。",
+  "timestamp": "2026-07-07T12:52:05"
 }

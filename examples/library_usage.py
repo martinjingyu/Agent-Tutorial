@@ -2,7 +2,6 @@
 Examples of using research_agent as a library.
 
 Opt-in extras (not loaded by default):
-    register_kanban_wait_complete()  — blocking kanban wait for batch pipelines
     register_meeting_tools()         — meeting orchestration for moderator agents
 """
 from __future__ import annotations
@@ -26,27 +25,7 @@ session.run_turn("Append a 4th bullet point about type hints.")
 # history is carried automatically between turns
 
 
-# ── 3. Kanban — batch mode (blocking wait) ────────────────────────────────
-#
-# Agent dispatches pipeline, then kanban_wait_complete blocks internally
-# until all tasks finish. No LLM calls during the wait.
-# Requires explicit opt-in.
-
-from research_agent.tools.kanban import register_kanban_wait_complete
-register_kanban_wait_complete()
-
-batch_session = ChatSession(GeneralAgent(model="deepseek-chat", provider="deepseek"))
-batch_session.run_turn("""
-Create a kanban board 'research' with 3 parallel tasks:
-  task-a: search Python asyncio docs
-  task-b: search Python threading docs
-  task-c: search Python multiprocessing docs
-Dispatch, then call kanban_wait_complete, then summarise all results.
-""")
-# run_turn() returns only after the full pipeline + review is done
-
-
-# ── 4. Kanban — interactive mode (event-driven) ───────────────────────────
+# ── 3. Kanban — interactive mode (event-driven) ───────────────────────────
 #
 # Agent subscribes and returns immediately. Caller polls for events
 # via drain_pending() and decides when to trigger the next turn.
@@ -73,14 +52,14 @@ while True:
         break
 
 
-# ── 5. Interactive terminal (CLI-style) ───────────────────────────────────
+# ── 4. Interactive terminal (CLI-style) ───────────────────────────────────
 #
 # Hand off entirely to ChatSession — it manages input(), history, and watcher.
 
 # ChatSession(GeneralAgent(...)).start_interactive()
 
 
-# ── 6. KanbanWatcher standalone ───────────────────────────────────────────
+# ── 5. KanbanWatcher standalone ───────────────────────────────────────────
 #
 # For callers that manage their own agent lifecycle and just need the event hook.
 
@@ -92,7 +71,7 @@ watcher = KanbanWatcher(on_event=on_pipeline_done).start()
 watcher.stop()
 
 
-# ── 7. Meeting orchestration ──────────────────────────────────────────────
+# ── 6. Meeting orchestration ──────────────────────────────────────────────
 #
 # A Moderator agent runs a structured multi-agent discussion.
 # Participants are full GeneralAgents with their own tool loops,

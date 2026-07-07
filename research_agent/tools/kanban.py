@@ -514,8 +514,7 @@ def _polling_hint(tasks: list[dict]) -> str:
             f"{running} task(s) still running. "
             "DO NOT call kanban_list_tasks or kanban_show_task again to poll 鈥?"
             "workers advance the board automatically. "
-            "Use kanban_notify_subscribe then respond_to_user, "
-            "or kanban_wait_complete, to handle completion."
+            "Use kanban_notify_subscribe then respond_to_user to handle completion."
         )
     return ""
 
@@ -1376,83 +1375,6 @@ registry.register("kanban_retry_task", {
         "required": ["task_id"],
     },
 }, _handle_retry_task)
-
-def _handle_wait_complete(args: dict, runtime: dict) -> str:
-    """Blocking wait 鈥?polls until all board tasks reach a terminal state.
-
-    No LLM calls are made during the wait.  Intended for non-interactive
-    contexts (subprocesses, batch pipelines) where blocking is acceptable.
-    NOT registered by default; call register_kanban_wait_complete() to opt in.
-    """
-    import time as _time
-
-    board_name = str(args.get("board") or DEFAULT_BOARD)
-    timeout    = float(args.get("timeout") or 3600)
-    poll       = float(args.get("poll_interval") or 3.0)
-
-    deadline = _time.monotonic() + timeout
-    while _time.monotonic() < deadline:
-        data = _load_board(board_name)
-        _sync_running(data)
-        _save_board(data, board_name)
-        all_tasks = list(data["tasks"].values())
-        still_active = any(
-            t.get("status") not in TERMINAL_STATES and t.get("status") != "done"
-            for t in all_tasks
-        )
-        if not still_active:
-            n_done  = sum(1 for t in all_tasks if t.get("status") == "done")
-            n_error = sum(1 for t in all_tasks if t.get("status") in ("error", "blocked", "cancelled"))
-            summaries = [
-                {
-                    "id":     t["id"],
-                    "title":  t.get("title"),
-                    "status": t.get("status"),
-                    "final":  (t.get("final") or "")[:500],
-                }
-                for t in sorted(all_tasks, key=lambda t: t.get("created_at", ""))
-            ]
-            return json_result(
-                success=True, board=board_name,
-                done=n_done, error=n_error, tasks=summaries,
-                hint="All tasks complete. Review results and continue.",
-            )
-        _time.sleep(poll)
-
-    return json_result(
-        success=False, error="timeout", board=board_name,
-        hint="Pipeline timed out 鈥?some tasks may still be running.",
-    )
-
-
-def register_kanban_wait_complete() -> None:
-    """Opt-in: register the blocking kanban_wait_complete tool.
-
-    Call this once at startup in non-interactive contexts (e.g. ScreeningPipeline).
-    Do NOT call in interactive CLI agents 鈥?use kanban_notify_subscribe instead.
-    """
-    registry.register(
-        "kanban_wait_complete",
-        {
-            "description": (
-                "Block and wait for ALL tasks on a Kanban board to finish. "
-                "Polls the board every poll_interval seconds without using LLM tokens. "
-                "Returns full task results when the pipeline is complete. "
-                "Use this instead of kanban_notify_subscribe in batch/subprocess contexts."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "board":          {"type": "string", "default": DEFAULT_BOARD},
-                    "timeout":        {"type": "number", "default": 3600, "description": "Max seconds to wait."},
-                    "poll_interval":  {"type": "number", "default": 3.0,  "description": "Seconds between status checks."},
-                },
-                "required": [],
-            },
-        },
-        _handle_wait_complete,
-    )
-
 
 def _handle_notify_subscribe(args: dict, runtime: dict) -> str:
     board_name = str(args.get("board") or DEFAULT_BOARD)
