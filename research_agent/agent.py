@@ -666,14 +666,9 @@ class GeneralAgent:
 
         messages = self._repair_tool_sequences(messages)
         default_session_path = save_session(self.session_id, messages, sub_agent=self._sub_agent)
-        if self._session_path:
-            self._session_path.parent.mkdir(parents=True, exist_ok=True)
-            self._session_path.write_text(
-                json.dumps(messages, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
-            )
-            session_path = self._session_path
-        else:
-            session_path = default_session_path
+        session_path = self._session_path if self._session_path else default_session_path
+        # _write_live_cache() (below) already persists the final, repaired `messages`
+        # to self._session_path atomically -- no need to write it again here.
         self._write_live_cache("completed", messages, final_text=final_text, session_path=str(session_path))
         self.ui.final_answer(final_text, iteration)
         self.ui.saved(str(session_path))
@@ -706,6 +701,28 @@ class GeneralAgent:
             "messages": messages,
         }
 
+    @staticmethod
+    def _atomic_write(path: Path, body: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(body, encoding="utf-8")
+        # Windows readers can briefly lock the target while dashboards or
+        # kanban sync inspect it. Retry the atomic replace before falling back.
+        for attempt in range(5):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError:
+                if attempt < 4:
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                path.write_text(body, encoding="utf-8")
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return
+
     def _write_live_cache(
         self,
         status: str,
@@ -714,6 +731,20 @@ class GeneralAgent:
         final_text: str = "",
         session_path: str | None = None,
     ) -> None:
+        # session_path (if the caller supplied one) is persisted here too, at the
+        # same granular points as the live cache below -- not just once at the end
+        # of run(). A session_path that only gets written once, after the whole
+        # (possibly many-tool-call, possibly long-running) call finishes reflects
+        # nothing while it's in flight and loses everything if the process is
+        # killed partway through; there's no cost reason to treat it differently
+        # from the live cache, which already does this same messages-array
+        # serialize-and-write on essentially every iteration and every tool result.
+        if self._session_path:
+            self._atomic_write(
+                self._session_path,
+                json.dumps(messages, ensure_ascii=False, indent=2, default=str),
+            )
+
         if not self._live_cache_path:
             return
         payload = {
@@ -726,26 +757,10 @@ class GeneralAgent:
         }
         if session_path:
             payload["session_path"] = session_path
-        self._live_cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._live_cache_path.with_suffix(self._live_cache_path.suffix + ".tmp")
-        body = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
-        tmp.write_text(body, encoding="utf-8")
-        # Windows readers can briefly lock the live cache while dashboards or
-        # kanban sync inspect it. Retry the atomic replace before falling back.
-        for attempt in range(5):
-            try:
-                tmp.replace(self._live_cache_path)
-                return
-            except PermissionError:
-                if attempt < 4:
-                    time.sleep(0.1 * (attempt + 1))
-                    continue
-                self._live_cache_path.write_text(body, encoding="utf-8")
-                try:
-                    tmp.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                return
+        self._atomic_write(
+            self._live_cache_path,
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        )
 
     def _process_tool_result(self, result: Any, tool_name: str, tool_args: dict[str, Any] | None = None) -> Any:
         if not isinstance(result, str):

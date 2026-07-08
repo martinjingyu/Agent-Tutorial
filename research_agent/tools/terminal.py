@@ -1,30 +1,9 @@
 from __future__ import annotations
 
-import locale
-import os
 import re
-import subprocess
 
-from ..safety import build_subprocess_env, check_command, resolve_workspace_path
-from .registry import json_result, registry
+from .registry import registry
 
-
-def _console_encoding() -> str:
-    """Encoding the spawned cmd.exe actually writes with (the *active* console
-    output codepage it inherits, not the system's static OEM default -- these
-    differ whenever the terminal has switched to UTF-8, e.g. via `chcp 65001`
-    or modern terminals/PowerShell that default to it)."""
-    if os.name != "nt":
-        return "utf-8"
-    try:
-        import ctypes
-
-        cp = ctypes.windll.kernel32.GetConsoleOutputCP()
-        if cp:
-            return f"cp{cp}"
-        return f"cp{ctypes.windll.kernel32.GetOEMCP()}"
-    except Exception:
-        return locale.getpreferredencoding(False)
 
 def _normalize_windows_cmd(cmd: str) -> str:
     cmd = re.sub(r'\bmkdir\s+-p\s+', 'mkdir ', cmd)
@@ -48,47 +27,15 @@ def _normalize_windows_cmd(cmd: str) -> str:
     return cmd
 
 
-def _execute_command(args: dict, runtime: dict, *, workdir_key: str = "workdir", default_timeout: int = 60) -> str:
-    command = str(args.get("command") or "")
-    if not command:
-        return json_result(success=False, error="command is required")
-    check_command(command)
-    if os.name == "nt":
-        command = _normalize_windows_cmd(command)
-    try:
-        raw_workdir = args.get(workdir_key) or args.get("workdir") or args.get("cwd") or "."
-        workdir = resolve_workspace_path(raw_workdir)
-    except Exception as exc:
-        return json_result(success=False, error=f"Invalid workdir: {exc}")
-    timeout = int(args.get("timeout") or default_timeout)
-    try:
-        proc = subprocess.run(
-            command,
-            cwd=str(workdir),
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding=_console_encoding(),
-            errors='replace',
-            env=build_subprocess_env(),
-        )
-    except subprocess.TimeoutExpired:
-        return json_result(success=False, error=f"Command timed out after {timeout}s")
-    except Exception as exc:
-        return json_result(success=False, error=f"{type(exc).__name__}: {exc}")
-    stdout = proc.stdout[-20000:]
-    stderr = proc.stderr[-8000:]
-    return json_result(
-        success=proc.returncode == 0,
-        returncode=proc.returncode,
-        stdout=stdout,
-        stderr=stderr,
-    )
-
-
 def _terminal(args: dict, runtime: dict) -> str:
-    return _execute_command(args, runtime, workdir_key="workdir", default_timeout=60)
+    # Note: run_with_settle applies _normalize_windows_cmd itself -- don't
+    # duplicate that here.
+    from .background import run_with_settle
+
+    command = str(args.get("command") or "")
+    timeout = float(args.get("timeout") or 60)
+    workdir_arg = args.get("workdir") or args.get("cwd")
+    return run_with_settle(command, workdir_arg, timeout)
 
 
 registry.register(
@@ -100,10 +47,10 @@ registry.register(
             "(dir, type, copy, move, mkdir, rmdir /s /q, del /f /q) or explicit powershell -Command. "
             "Do not use Unix-only flags such as mkdir -p, cp -r, rm -rf, grep, sed, or head unless you "
             "know they are available. Common Unix commands are normalized on Windows when possible. "
-            "Caution: on Windows, if this command times out, the underlying process may keep "
-            "running invisibly in the background rather than actually stopping -- for anything "
-            "that might take more than ~30-60 seconds, use run_background + wait_for_background "
-            "instead, which track the process honestly instead of guessing from a timeout."
+            "If the command doesn't finish within `timeout` seconds (default 60), it is NOT killed "
+            "and this is NOT reported as a failure -- it's handed off to a background watcher (the "
+            "same mechanism as run_background) and you'll be notified automatically with the result "
+            "on your next turn, no polling needed."
         ),
         "parameters": {
             "type": "object",

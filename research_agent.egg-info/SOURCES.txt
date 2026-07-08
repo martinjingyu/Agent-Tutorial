@@ -28,6 +28,7 @@ research_agent/models/codex.py
 research_agent/models/deepseek.py
 research_agent/models/openai.py
 research_agent/tools/__init__.py
+research_agent/tools/background.py
 research_agent/tools/browser.py
 research_agent/tools/compact.py
 research_agent/tools/files.py
