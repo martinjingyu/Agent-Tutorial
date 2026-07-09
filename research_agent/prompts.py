@@ -56,6 +56,14 @@ Role identity:
 """
 
 
+COMPACT_MODE_PROMPT = """Context compaction mode:
+You may occasionally receive a <runtime_control mode="compact"> instruction appended to the
+conversation. When that happens, follow it exactly and call the compact_checkpoint tool with
+the requested checkpoint. Never call compact_checkpoint at any other time — it has no effect
+outside compact mode. The instruction itself carries the full rules and output format.
+"""
+
+
 ROLE_PROFILES = {
     "main": """Agent role profile: main
 - You are the user-facing high-level scheduling agent. You talk to the user, orchestrate work, dispatch tasks through Kanban/meetings/subagents, and report results.
@@ -197,6 +205,7 @@ def build_system_prompt(skills_index: str = "", *, agent_role: str = "main") -> 
         shell_context,
         role_profile.strip(),
         BASE_SYSTEM_PROMPT.strip(),
+        COMPACT_MODE_PROMPT.strip(),
     ]
     if include_code_structure:
         project_structure = _directory_tree(SOURCE_DIR, skip_dirs=_STRUCTURE_SKIP_DIRS | {"skills"})

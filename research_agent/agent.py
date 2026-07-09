@@ -77,7 +77,10 @@ PREVIOUS_SNAPSHOT_LIMIT = 2_000
 PREVIOUS_READ_FILE_LIMIT = 500
 CONTINUATION_MAX_ITERS = 30
 TRAJECTORY_COMPRESS_THRESHOLD = 180_000
-TRAJECTORY_COMPRESS_MIN_GAP = 5
+COMPACT_MIN_GAP = 3
+"""Minimum iterations between any two automatic compactions (pre-action check,
+trajectory/token threshold check). Prevents different triggers from firing back
+to back and burning extra LLM calls on the same few iterations."""
 FINISH_BLOCKED_TOOLS = {
     "bing_search",
     "google_search",
@@ -191,6 +194,7 @@ class GeneralAgent:
         max_iterations: int = 24,
         context_threshold_tokens: int = 90000,
         auto_compact: bool = True,
+        semantic_review: bool = False,
         self_review: bool = False,
         ui: ConsoleUI | None = None,
         live_cache_path: str | Path | None = None,
@@ -214,6 +218,10 @@ class GeneralAgent:
         self.max_iterations = max_iterations
         self.context_threshold_tokens = context_threshold_tokens
         self.auto_compact = auto_compact
+        # Off by default: this does an extra LLM call on every single turn just to
+        # decide whether to compact, which adds latency/cost that most turns don't need.
+        # The threshold-based triggers (token/char count) already catch runaway growth.
+        self.semantic_review = semantic_review
         self.self_review_enabled = self_review
         self.ui = ui or ConsoleUI(enabled=True)
         self.session_id = session_id or new_session_id()
@@ -222,7 +230,7 @@ class GeneralAgent:
         self.task_id = f"task_{uuid.uuid4().hex[:8]}"
         self._spill_dir = SESSIONS_DIR / ".tool_cache" / self.session_id
         self._spill_counter = 0
-        self._last_trajectory_compress_iter = 0
+        self._last_compact_iter = 0
         self._live_cache_path = Path(live_cache_path) if live_cache_path else None
         self._live_cache_metadata = live_cache_metadata or {}
         self.ui.session_start(self.session_id, self.task_id)
@@ -333,7 +341,7 @@ class GeneralAgent:
                             f"pre-loop: {decision.get('reason', 'new independent task')}"
                         )
                         compacted = compact_messages(
-                            messages, self.llm, focus=focus
+                            messages, self.llm, system_prompt, self._registry, focus=focus
                         )
                         return self._repair_tool_sequences(compacted)
                     else:
@@ -398,10 +406,14 @@ class GeneralAgent:
         )
         if pending_tool_call_msg is not None:
             prefix = self._repair_tool_sequences(messages[:-1])
-            compacted_prefix = compact_messages(prefix, self.llm, focus=user_message)
+            compacted_prefix = compact_messages(
+                prefix, self.llm, system_prompt, self._registry, focus=user_message
+            )
             return self._repair_tool_sequences(compacted_prefix) + [pending_tool_call_msg]
 
-        compacted = compact_messages(messages, self.llm, focus=user_message)
+        compacted = compact_messages(
+            messages, self.llm, system_prompt, self._registry, focus=user_message
+        )
         return self._repair_tool_sequences(compacted)
 
     def run(
@@ -419,16 +431,20 @@ class GeneralAgent:
 
         messages = self._repair_tool_sequences(list(history or []))
         system_prompt = system_prompt or self._build_system_prompt()
+        # Iteration numbers are per-run (start at 1 below), so the gap throttle
+        # must reset per run too, otherwise a compaction late in a previous run
+        # can suppress compaction early in this one.
+        self._last_compact_iter = 0
 
-
-        # ── Pre-loop compact review ──────────────────────────────────────
-        if self.auto_compact and messages:
+        # ── Pre-loop compact review (semantic, opt-in) ─────────────────────
+        if self.auto_compact and self.semantic_review and messages:
             compacted = self._pre_loop_compact_review(
                 messages, user_message, system_prompt
             )
             if compacted is not None:
                 messages = compacted
                 system_prompt = self._build_system_prompt()
+                self._last_compact_iter = 0
         # ─────────────────────────────────────────────────────────────────
 
         messages.append({"role": "user", "content": user_message})
@@ -452,21 +468,27 @@ class GeneralAgent:
                 self.ui.final()
                 break
 
-            if self.auto_compact and (
-                iteration - self._last_trajectory_compress_iter >= TRAJECTORY_COMPRESS_MIN_GAP
-                and self._estimate_message_chars(messages) >= TRAJECTORY_COMPRESS_THRESHOLD
-            ):
-                self.ui.compact(f"trajectory exceeded {TRAJECTORY_COMPRESS_THRESHOLD:,} chars")
-                messages = compact_messages(messages, self.llm, focus=user_message, protect_last=18)
-                messages = self._repair_tool_sequences(messages)
-                system_prompt = self._build_system_prompt()
-                self._last_trajectory_compress_iter = iteration
-
-            if self.auto_compact and rough_tokens(messages, system_prompt) > self.context_threshold_tokens:
-                self.ui.compact("context threshold exceeded")
-                messages = compact_messages(messages, self.llm, focus=user_message)
-                messages = self._repair_tool_sequences(messages)
-                system_prompt = self._build_system_prompt()
+            # ── Trajectory/token threshold compaction (single gatekeeper) ──────
+            # Both size signals are checked together, behind one shared cooldown,
+            # so a single oversized turn can't trigger two back-to-back compactions.
+            if self.auto_compact and iteration - self._last_compact_iter >= COMPACT_MIN_GAP:
+                over_chars = self._estimate_message_chars(messages) >= TRAJECTORY_COMPRESS_THRESHOLD
+                over_tokens = rough_tokens(messages, system_prompt) > self.context_threshold_tokens
+                if over_chars or over_tokens:
+                    reason = (
+                        f"trajectory exceeded {TRAJECTORY_COMPRESS_THRESHOLD:,} chars"
+                        if over_chars
+                        else "context threshold exceeded"
+                    )
+                    self.ui.compact(reason)
+                    messages = compact_messages(
+                        messages, self.llm, system_prompt, self._registry, focus=user_message,
+                        protect_last=18 if over_chars else 12,
+                    )
+                    messages = self._repair_tool_sequences(messages)
+                    system_prompt = self._build_system_prompt()
+                    self._last_compact_iter = iteration
+            # ─────────────────────────────────────────────────────────────────
 
             messages = self._repair_tool_sequences(messages)
             api_messages = [{"role": "system", "content": system_prompt}, *messages]
@@ -514,13 +536,14 @@ class GeneralAgent:
                 self._write_live_cache("running", messages, final_text=final_text)
 
                 # ── Pre-action compact check ──────────────────────────────
-                if self.auto_compact:
+                if self.auto_compact and iteration - self._last_compact_iter >= COMPACT_MIN_GAP:
                     compacted = self._pre_action_compact_check(
                         messages, system_prompt, user_message
                     )
                     if compacted is not None:
                         messages = compacted
                         system_prompt = self._build_system_prompt()
+                        self._last_compact_iter = iteration
                 # ──────────────────────────────────────────────────────────
 
                 compact_focus = None
@@ -644,9 +667,12 @@ class GeneralAgent:
                     continue
                 if compact_focus and self.auto_compact:
                     self.ui.compact(compact_focus)
-                    messages = compact_messages(messages, self.llm, focus=compact_focus)
+                    messages = compact_messages(
+                        messages, self.llm, system_prompt, self._registry, focus=compact_focus
+                    )
                     messages = self._repair_tool_sequences(messages)
                     system_prompt = self._build_system_prompt()
+                    self._last_compact_iter = iteration
                 if final_text:
                     self.ui.final()
                     break

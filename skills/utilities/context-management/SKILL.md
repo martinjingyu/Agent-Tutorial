@@ -14,14 +14,17 @@ description: 上下文管理最佳实践。指导 agent 在何时以及如何主
 
 > **Compact 不是失败，而是主动的认知整理。在开始新任务前清理旧上下文，比等到 token 超阈值再被动 compact 更有效。**
 
-## Pre-loop compact review（新）
+## Pre-loop compact review（默认关闭）
 
-`agent.py` 内置了 `_pre_loop_compact_review` 机制，在 **每次 agent loop 开始之前**（即处理用户消息之前）执行：
+`agent.py` 内置了 `_pre_loop_compact_review` 机制，在 **每次 agent loop 开始之前**（即处理用户消息之前）执行。
 
-### 触发条件
+**该机制默认关闭**（`GeneralAgent(semantic_review=False)`），因为它会在每一轮用户消息上都多打一次 LLM 调用去做"是否需要 compact"的语义判断，对大多数不需要 compact 的轮次也会产生额外延迟和成本。已有的阈值型触发（token/字符数，见下文）足以兜住上下文失控的情况。如果任务场景里经常出现"同一 session 内切换到完全独立的新任务"（比如批量调研多个学校/候选人），可以显式传入 `semantic_review=True` 打开这个语义级清理。
 
-1. 历史消息 ≥ 6 条
-2. 调用 LLM 判断：**新用户消息是否代表一个与之前对话独立的新任务**
+### 触发条件（开启后）
+
+1. `semantic_review=True`
+2. 历史消息 ≥ 6 条
+3. 调用 LLM 判断：**新用户消息是否代表一个与之前对话独立的新任务**
 
 ### LLM 判断逻辑
 
@@ -47,12 +50,13 @@ LLM 收到一个 review prompt，包含：
 
 ### 与自动 compact 的关系
 
-| 机制 | 触发时机 | 判断方式 | 目的 |
-|------|---------|---------|------|
-| `_pre_loop_compact_review` | loop 开始前 | LLM 语义判断 | 跨任务边界清理 |
-| `_pre_action_compact_check` | tool_calls 执行前 | 硬阈值（数量+token） | 同任务内防溢出 |
+| 机制 | 触发时机 | 判断方式 | 目的 | 默认 |
+|------|---------|---------|------|------|
+| `_pre_loop_compact_review` | loop 开始前 | LLM 语义判断 | 跨任务边界清理 | 关闭 |
+| `_pre_action_compact_check` | tool_calls 执行前 | 硬阈值（数量+token） | 同任务内防溢出 | 开启 |
+| 轨迹/token 阈值（循环内统一判断） | 每轮迭代 | 硬阈值（字符数 or token，二选一命中即触发） | 防上下文失控 | 开启 |
 
-两者互补：pre-loop 负责**任务级别的语义压缩**，pre-action 负责**token 级别的防溢出压缩**。
+三者共用同一个全局冷却计数器 `_last_compact_iter`：任意一次自动压缩发生后，`COMPACT_MIN_GAP`（3 轮迭代）内其他自动触发点都会被抑制，避免同一时间窗口内被不同触发条件反复压缩、白白多打 LLM 摘要调用。手动 `compact_context` 工具请求不受此冷却限制（这是 LLM 主动做出的明确决策），但触发后同样会刷新冷却计数器。
 
 ## 自动 compact 机制（原有）
 
