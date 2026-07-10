@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..md_entries import read_entries, write_entries
 from ..paths import MEMORIES_DIR
 from .registry import json_result, registry
-
-DELIMITER = "\n§\n"
 
 
 def _memory_path(target: str) -> Path:
@@ -14,17 +13,11 @@ def _memory_path(target: str) -> Path:
 
 
 def _read_entries(target: str) -> list[str]:
-    path = _memory_path(target)
-    if not path.exists():
-        return []
-    text = path.read_text(encoding="utf-8", errors="replace").strip()
-    if not text:
-        return []
-    return [entry.strip() for entry in text.split(DELIMITER) if entry.strip()]
+    return read_entries(_memory_path(target))
 
 
 def _write_entries(target: str, entries: list[str]) -> None:
-    _memory_path(target).write_text(DELIMITER.join(entries).strip() + ("\n" if entries else ""), encoding="utf-8")
+    write_entries(_memory_path(target), entries)
 
 
 def memory_snapshot() -> str:

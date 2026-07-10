@@ -32,3 +32,23 @@ def workspace_root() -> Path:
     if env_override:
         return Path(env_override).expanduser().resolve()
     return Path(PROJECT_ROOT / "workspace").expanduser().resolve()
+
+
+_roles_root_override: Path | None = None
+
+
+def set_roles_root(path: str | Path) -> None:
+    """Programmatic override for roles_root(), for embedding projects (e.g.
+    Agent-Meeting) that keep their own private role library instead of sharing
+    this package's own roles/ directory."""
+    global _roles_root_override
+    _roles_root_override = Path(path).expanduser().resolve()
+
+
+def roles_root() -> Path:
+    if _roles_root_override is not None:
+        return _roles_root_override
+    env_override = os.getenv("AGENT_ROLES_ROOT")
+    if env_override:
+        return Path(env_override).expanduser().resolve()
+    return Path(PROJECT_ROOT / "roles").expanduser().resolve()

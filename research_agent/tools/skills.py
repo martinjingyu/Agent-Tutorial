@@ -65,6 +65,13 @@ def _audience_values(frontmatter: dict) -> set[str]:
 
 
 def _skill_visible_for_role(frontmatter: dict, runtime: dict) -> bool:
+    # An explicit per-run skill allowlist (e.g. a role's own DEFINITION.md `skills:`
+    # list, threaded in via GeneralAgent's extra_runtime -> runtime["role_skills"])
+    # bypasses the audience gate below -- it's an opt-in from the caller for this
+    # specific run, not a change to the skill's own declared audience.
+    name = str(frontmatter.get("name") or "")
+    if name and name in (runtime.get("role_skills") or ()):
+        return True
     audiences = _audience_values(frontmatter)
     if not audiences or "all" in audiences or "*" in audiences:
         return True

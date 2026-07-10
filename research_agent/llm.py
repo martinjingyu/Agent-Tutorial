@@ -3,11 +3,12 @@ from __future__ import annotations
 import base64
 import json
 import os
+import random
 import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 from openai import OpenAI
 
@@ -236,6 +237,36 @@ class LLMClient:
         )
         return status in (429, 500, 502, 503, 504)
 
+    _MAX_RETRIES = 5
+
+    @classmethod
+    def _retry_wait(cls, attempt: int) -> float:
+        """Exponential backoff (5s, 10s, 20s, 40s, capped at 60s) plus up to 3s of
+        random jitter. The jitter matters more than usual here: callers like
+        Agent-Meeting fire several participants' LLM calls concurrently, so without
+        jitter every one of them would retry in lockstep on the same schedule -- if a
+        shared rate/concurrency limit caused the failures in the first place, retrying
+        in lockstep just recreates the same burst that tripped it."""
+        base = min(5 * (2 ** attempt), 60)
+        return base + random.uniform(0, 3)
+
+    def _with_retry(self, fn: Callable[[], Any]) -> Any:
+        max_retries = self._MAX_RETRIES
+        for attempt in range(max_retries + 1):
+            try:
+                return fn()
+            except Exception as exc:
+                if attempt < max_retries and self._is_transient(exc):
+                    wait = self._retry_wait(attempt)
+                    print(
+                        f"[LLM] transient error ({type(exc).__name__}), "
+                        f"retry {attempt + 1}/{max_retries} in {wait:.1f}s…",
+                        flush=True,
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
+
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Any:
         if self.provider == "codex":
             return self._codex_chat(messages, tools)
@@ -251,17 +282,7 @@ class LLMClient:
             if extra_body:
                 kwargs["extra_body"] = extra_body
 
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                return self._client_or_create().chat.completions.create(**kwargs)
-            except Exception as exc:
-                if attempt < max_retries and self._is_transient(exc):
-                    wait = 5 * (attempt + 1)
-                    print(f"[LLM] transient error ({type(exc).__name__}), retry {attempt+1}/{max_retries} in {wait}s…", flush=True)
-                    time.sleep(wait)
-                else:
-                    raise
+        return self._with_retry(lambda: self._client_or_create().chat.completions.create(**kwargs))
 
     def complete_text(self, prompt: str) -> str:
         if self.provider == "codex":
@@ -276,7 +297,8 @@ class LLMClient:
             extra_body = _deepseek_extra_body()
             if extra_body:
                 kwargs["extra_body"] = extra_body
-        response = self._client_or_create().chat.completions.create(**kwargs)
+
+        response = self._with_retry(lambda: self._client_or_create().chat.completions.create(**kwargs))
         return response.choices[0].message.content or ""
 
     def _codex_session_kwargs(self) -> dict[str, Any]:

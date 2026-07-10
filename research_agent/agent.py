@@ -209,6 +209,7 @@ class GeneralAgent:
         agent_role: str | None = None,
         cancel_check: Callable[[], bool] | None = None,
         workspace_root: str | Path | None = None,
+        extra_runtime: dict[str, Any] | None = None,
     ) -> None:
         if workspace_root is not None:
             set_workspace_root(workspace_root)
@@ -242,6 +243,13 @@ class GeneralAgent:
         self._candidate_folder = str(candidate_folder) if candidate_folder else None
         self._session_path = Path(session_path) if session_path else None
         self._cancel_check = cancel_check
+        self._system_prompt_override: str | None = None
+        # Free-form extra keys merged into the per-run runtime dict (agent.py's run()
+        # builds a fresh one every call) -- lets embedding projects thread caller-specific
+        # context (e.g. a role's memory file path, an explicit skill allowlist) through to
+        # tool handlers via the runtime dict, the same way task_id/agent_role already are,
+        # without needing a new constructor param per use case.
+        self._extra_runtime: dict[str, Any] = dict(extra_runtime) if extra_runtime else {}
 
     def _cancel_requested(self) -> bool:
         if not self._cancel_check:
@@ -272,6 +280,13 @@ class GeneralAgent:
             return ""
 
     def _build_system_prompt(self) -> str:
+        # A caller-supplied system_prompt (run(..., system_prompt=...)) is an identity
+        # override, not just a first-turn default -- every internal rebuild (post-compact,
+        # fallback-finish) must keep honoring it for the rest of this run, otherwise a long
+        # run silently drops the caller's identity/instructions and falls back to this
+        # library's generic default prompt mid-conversation.
+        if self._system_prompt_override is not None:
+            return self._system_prompt_override
         return build_system_prompt(self._skills_index(), agent_role=self.agent_role)
 
     def _pre_loop_compact_review(
@@ -430,6 +445,7 @@ class GeneralAgent:
             user_message = f"{notif_text}\n\n---\n{user_message}" if user_message.strip() else notif_text
 
         messages = self._repair_tool_sequences(list(history or []))
+        self._system_prompt_override = system_prompt
         system_prompt = system_prompt or self._build_system_prompt()
         # Iteration numbers are per-run (start at 1 below), so the gap throttle
         # must reset per run too, otherwise a compaction late in a previous run
@@ -458,6 +474,7 @@ class GeneralAgent:
             "agent_role": self.agent_role,
             "user_task": user_message,
             **({"candidate_folder": self._candidate_folder} if self._candidate_folder else {}),
+            **self._extra_runtime,
         }
 
         for iteration in range(1, self.max_iterations + 1):
@@ -691,10 +708,15 @@ class GeneralAgent:
             self.ui.final()
 
         messages = self._repair_tool_sequences(messages)
-        default_session_path = save_session(self.session_id, messages, sub_agent=self._sub_agent)
-        session_path = self._session_path if self._session_path else default_session_path
-        # _write_live_cache() (below) already persists the final, repaired `messages`
-        # to self._session_path atomically -- no need to write it again here.
+        # A caller-supplied session_path means the caller owns where this session lives
+        # (e.g. an embedding project keeping its own runs/ directory) -- skip the default
+        # SESSIONS_DIR write entirely rather than writing the same messages to both places.
+        # _write_live_cache() (below) persists the final, repaired `messages` to
+        # self._session_path atomically once this block returns.
+        if self._session_path:
+            session_path = self._session_path
+        else:
+            session_path = save_session(self.session_id, messages, sub_agent=self._sub_agent)
         self._write_live_cache("completed", messages, final_text=final_text, session_path=str(session_path))
         self.ui.final_answer(final_text, iteration)
         self.ui.saved(str(session_path))

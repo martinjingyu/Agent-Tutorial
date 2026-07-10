@@ -107,3 +107,43 @@ OA 题目输入数据量要求：10w+ 字（不是 2w），用于 7.2-HJY 的 OA
 **Target venue**: NeurIPS 2026 (primary) → ICML 2027 (backup)
 
 **Full report**: reports/agent-code-aware-training-meeting-conclusion.md
+§
+Stage 2 pipeline design for diversity-ranking-planner: Two-phase approach with heuristic pre-filter (Phase A) followed by model-based classification (Phase B) applied only to candidates. Model constraints: MobileNetV3-Small (2.5M params) for fast CPU inference. Environment: Windows 10, CPU-only, Intel UHD 770, 32GB RAM, PyTorch CPU-only. All 11 datasets are flat directories under C:\pics.
+§
+This planning meeting produced the final Stage 2 executor plan at workspace/gallery_pipeline/PLAN_final.md. Key facts for future reference:
+
+- The recommended codebase is select_gallery.py (single-file, working, produces HTML preview + CSV audit trail + statistics, has checkpoint/resume)
+- It already ran successfully on kpmg_forensic (80 images), thema-med (273), tuv_rheinland (1,465), and truro_school (36,266 - partial)
+- Known bugs to fix: gradient_kurtosis_max=15 too aggressive for truro_school (rejected 18,185/36,266 = 50.1% valid photos); raise to 20.0 for campus type. scene_limit=18 caps truro_school at 55/100; raise to 25 for campus.
+- The pipeline runs CPU-only with numpy + Pillow + opencv-python (no PyTorch/CUDA needed for Stage A)
+- Stage B (MobileCLIP-S0, ~11M params, via open_clip) is optional post-hoc for render_mix/mixed datasets only
+- Per-dataset overrides defined in dataset_metadata.yaml (label system: mixed, render_mix, dup_heavy, large_real_photo, chart_diagram, campus)
+- Total runtime estimate: ~82 min for all 11 datasets (62K images) with Stage A only
+§
+## Diversity Ranking Pipeline Design (from planning meeting)
+
+**Architecture:** 3-stage pipeline for selecting ≤100 diverse gallery images per dataset from C:\pics (11 datasets, 61,958 images total).
+
+**Stage A — Heuristic Pre-filter (~70 min CPU, all images):**
+- Dataset-adaptive percentiles for sharpness/colorfulness thresholds (bottom 5% rejected), not hardcoded values
+- Validated: m_immobilier sharpness 4-13, colorfulness 17-29; truro_school sharpness 2.4-8.8, colorfulness 38-89 → single threshold impossible
+- Non-photo heuristics: edge density >0.35, saturation <0.08, unique colors <500, white bg >60% (≥3/4 → non-photo)
+- dhash 64-bit, Hamming ≤4 for near-duplicate detection
+- Only ~30% candidates pass through to Stage B
+
+**Stage B — Model Verifier (~8-12 hours CPU, only candidates):**
+- MobileCLIP-S0 (11M params, <100M constraint met)
+- Zero-shot prompts: real photo vs non-photo with asymmetric threshold (0.05 for real, 0.10 for non-photo → conservative bias)
+- Composite quality score: 40% heuristics + 60% CLIP confidence
+
+**Stage C — Diversity Selection (~15 min):**
+- Agglomerative clustering on CLIP embeddings (adaptive distance threshold, 5-15 clusters)
+- Per-cluster quota: max 30% of budget, min floor(total_budget / n_clusters)
+- Scene-type multiplier: group_people 1.15, single_person 0.75 (penalized)
+- If <100 candidates → report actual count, never pad
+
+**Total runtime:** ~10-13 hours for all 11 datasets. truro_school dominates at ~5-7 hours.
+
+**Output:** Per-dataset CSVs (top100, all_scores, each rejection category, review_pool, summary JSON), global summary, sampling check for human review.
+
+**Key risk:** High-quality 3D renders may pass as real photos; this is acceptable for gallery use. Heavily filtered photos may be misclassified — caught in review_pool.
