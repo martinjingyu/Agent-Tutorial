@@ -1,5 +1,5 @@
-"""Shared §-delimited markdown entry list format, used by both the global memory
-tool (tools/memory.py) and per-role memory (roles.py / tools/roles.py)."""
+"""Shared §-delimited markdown entry list format, used by the global memory
+tool (tools/memory.py)."""
 from __future__ import annotations
 
 from pathlib import Path

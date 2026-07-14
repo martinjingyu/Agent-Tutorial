@@ -104,35 +104,6 @@ body {
 .task-output { display: none; margin-top: 7px; padding: 7px; background: var(--bg); border-radius: 3px; font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
 .task-card.expanded .task-output { display: block; }
 
-/* ── Meeting ─────────────────────────────────────────────────── */
-.meeting-status { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; flex-shrink: 0; }
-.meeting-status.open   { background: #56d36422; color: var(--green); }
-.meeting-status.closed { background: #8b949e22; color: var(--muted); }
-.participants-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(210px,1fr)); gap: 8px; margin-bottom: 10px; }
-.participant-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px; }
-.participant-card.spoke { border-color: var(--green); }
-.participant-card.spoke .p-name::before { content: "✓ "; color: var(--green); }
-.p-name { font-weight: 600; font-size: 13px; margin-bottom: 1px; }
-.p-role { color: var(--purple); font-size: 10px; margin-bottom: 6px; }
-.p-response { font-size: 12px; color: var(--muted); line-height: 1.5; max-height: 100px; overflow-y: auto; white-space: pre-wrap; }
-.transcript-entry { display: flex; gap: 8px; margin-bottom: 8px; padding: 7px 9px; background: var(--bg3); border-radius: 4px; font-size: 12px; }
-.t-speaker { color: var(--cyan); font-weight: 600; white-space: nowrap; font-family: var(--mono); min-width: 80px; }
-.transcript-entry.moderator .t-speaker { color: var(--orange); }
-.t-content { color: var(--text); line-height: 1.5; white-space: pre-wrap; }
-.meeting-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-.meeting-action { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; }
-.meeting-action .a-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.meeting-action .a-type { color: var(--orange); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-.meeting-action .a-time { color: var(--muted); font-family: var(--mono); font-size: 10px; margin-left: auto; }
-.meeting-action .a-body { color: var(--text); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
-.meeting-action .a-meta { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
-.meeting-response { background: var(--bg3); border-left: 2px solid var(--cyan); padding: 7px 8px; margin-top: 6px; border-radius: 3px; }
-.meeting-response .speaker { color: var(--cyan); font-weight: 700; font-size: 11px; margin-bottom: 3px; }
-.conclusion-box { background: #56d36411; border: 1px solid #56d36444; border-radius: var(--radius); padding: 10px; margin-top: 10px; font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
-.conclusion-box::before { content: "Conclusion"; display: block; color: var(--green); font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 5px; }
-.notes-box { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px; font-size: 12px; color: var(--muted); white-space: pre-wrap; line-height: 1.5; margin-top: 8px; }
-.notes-box::before { content: "Notes"; display: block; color: var(--orange); font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
-
 /* ── Session messages ────────────────────────────────────────── */
 .message-list { display: flex; flex-direction: column; gap: 8px; }
 .msg { border-radius: var(--radius); padding: 9px 11px; font-size: 13px; line-height: 1.6; }
@@ -291,7 +262,6 @@ body {
   <h1>⬡ Agent Dashboard</h1>
   <div class="stat-pill">Sessions: <span id="tb-sessions">—</span></div>
   <div class="stat-pill">Boards: <span id="tb-boards">—</span></div>
-  <div class="stat-pill">Meetings: <span id="tb-meetings">—</span></div>
   <div class="stat-pill">Cost: <span id="tb-cost">—</span></div>
   <div id="live-dot"></div>
   <div id="live-time">—</div>
@@ -305,15 +275,12 @@ body {
     <div class="nav-item" data-view="chat"     onclick="startNewTalk()"><span class="nav-icon">✦</span> New Chat</div>
     <div class="nav-item" data-view="sessions" onclick="nav('sessions')"><span class="nav-icon">◈</span> Sessions</div>
     <div class="nav-item" data-view="kanban"   onclick="nav('kanban')"><span class="nav-icon">⊞</span> Kanban</div>
-    <div class="nav-item" data-view="meetings" onclick="nav('meetings')"><span class="nav-icon">◎</span> Meetings</div>
     <div class="nav-item" data-view="costs"    onclick="nav('costs')"><span class="nav-icon">◇</span> Costs</div>
 
     <div class="nav-section" id="talks-section" style="display:none">Talks</div>
     <div id="talks-nav"></div>
     <div class="nav-section" id="active-boards-section" style="display:none">Active Boards</div>
     <div id="active-boards-nav"></div>
-    <div class="nav-section" id="open-meetings-section" style="display:none">Open Meetings</div>
-    <div id="open-meetings-nav"></div>
   </div>
 
   <div id="main"><div class="loading">Loading…</div></div>
@@ -383,8 +350,6 @@ function renderView(view, params) {
     case 'session':   renderSession(params);     break;
     case 'kanban':    renderKanbanList();         break;
     case 'board':     renderBoard(params);        break;
-    case 'meetings':  renderMeetingList();        break;
-    case 'meeting':   renderMeeting(params);      break;
     case 'costs':     renderCosts();             break;
   }
 }
@@ -398,7 +363,6 @@ async function renderOverview() {
     <div class="overview-grid">
       <div class="stat-card"><div class="label">Sessions</div><div class="value c-cyan">${data.session_count}</div></div>
       <div class="stat-card"><div class="label">Active Boards</div><div class="value c-green">${data.active_board_count}<span style="font-size:13px;color:var(--muted)"> / ${data.board_count}</span></div></div>
-      <div class="stat-card"><div class="label">Open Meetings</div><div class="value c-yellow">${data.open_meeting_count}<span style="font-size:13px;color:var(--muted)"> / ${data.meeting_count}</span></div></div>
       <div class="stat-card"><div class="label">Total Cost</div><div class="value c-purple">$${(data.total_cost||0).toFixed(4)}</div></div>
     </div>
     ${data.active_boards.length ? `
@@ -407,15 +371,6 @@ async function renderOverview() {
         <div class="panel" style="cursor:pointer;margin-bottom:8px" onclick="nav('board','${b.name}')">
           <div class="panel-header">⊞ ${esc(b.name)}
             ${Object.entries(b.status_counts||{}).map(([s,n])=>`<span class="tag ${s}">${n} ${s}</span>`).join('')}
-          </div>
-        </div>`).join('')}` : ''}
-    ${data.open_meetings.length ? `
-      <div class="section-title">Open Meetings</div>
-      ${data.open_meetings.map(m=>`
-        <div class="panel" style="cursor:pointer;margin-bottom:8px" onclick="nav('meeting','${m.meeting_id}')">
-          <div class="panel-header">◎ ${esc(m.name||m.meeting_id||'')}
-            <span style="color:var(--muted);font-size:11px;font-weight:400;font-family:var(--mono)">${esc(m.meeting_id||'')}</span>
-            <span class="meeting-status open" style="margin-left:auto">open</span>
           </div>
         </div>`).join('')}` : ''}
     <div class="section-title">Recent Sessions</div>
@@ -446,6 +401,7 @@ function renderChat(sessionId) {
           <option value="deepseek-reasoner">deepseek-reasoner</option>
           <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
           <option value="claude-haiku-4-5">claude-haiku-4-5</option>
+          <option value="gpt-5.5" data-provider="codex">Codex (gpt-5.5)</option>
         </select>
         ${_chatSessionId ? `<span style="margin-left:10px" class="sid">session: ${_chatSessionId}</span>
           <button class="del-btn" onclick="newChat()" style="margin-left:auto">New ＋</button>` : ''}
@@ -589,7 +545,9 @@ async function chatSend() {
   input.value = '';
   input.style.height = 'auto';
 
-  const model = document.getElementById('chat-model')?.value || '';
+  const modelSel = document.getElementById('chat-model');
+  const model = modelSel?.value || '';
+  const provider = modelSel?.selectedOptions?.[0]?.dataset?.provider || '';
   appendChatMsg('user', msg);
   _chatRunning = true;
   document.getElementById('chat-send').disabled = true;
@@ -608,7 +566,7 @@ async function chatSend() {
   scrollChat();
 
   try {
-    const body = { message: msg, model: model || undefined };
+    const body = { message: msg, model: model || undefined, provider: provider || undefined };
     if (_chatSessionId) body.session_id = _chatSessionId;
     const resp = await apiFetch('/api/chat', { method: 'POST', body: JSON.stringify(body) });
     _chatSessionId = resp.session_id;
@@ -1111,7 +1069,6 @@ async function refreshWorkerModal() {
   }
 }
 
-// ── Meeting list ──────────────────────────────────────────────────
 async function cancelKanbanTask(event, btn) {
   event.stopPropagation();
   const boardName = btn.dataset.board || '';
@@ -1126,137 +1083,6 @@ async function cancelKanbanTask(event, btn) {
     btn.textContent = 'Failed';
     setTimeout(() => { btn.textContent = 'Interrupt'; }, 1200);
   }
-}
-
-async function renderMeetingList() {
-  const meetings = await api('/api/meetings');
-  const main = document.getElementById('main');
-  if (!meetings.length) { main.innerHTML = '<div class="empty-state">No meetings found</div>'; return; }
-  main.innerHTML = `
-    <div class="section-title">Meetings (${meetings.length})</div>
-    ${meetings.map(m=>`
-      <div class="panel" style="margin-bottom:8px">
-        <div class="panel-header">
-          <span style="cursor:pointer;flex:1" onclick="nav('meeting','${m.meeting_id}')">
-            ◎ ${esc(m.name||m.meeting_id||'')}
-            <span class="meeting-status ${m.closed_at?'closed':'open'}">${m.closed_at?'closed':'open'}</span>
-            <span style="color:var(--muted);font-size:10px;font-family:var(--mono);font-weight:400">${esc(m.meeting_id||'')}</span>
-          </span>
-          <span style="color:var(--muted);font-size:11px">${m.participant_count} participants</span>
-          <button class="del-btn" title="Delete meeting" onclick="deleteMeeting('${m.meeting_id}',this)">✕</button>
-        </div>
-        ${m.agenda ? `<div class="panel-body" style="font-size:12px;color:var(--muted)">${esc(m.agenda)}</div>` : ''}
-      </div>`).join('')}`;
-}
-
-async function deleteMeeting(id, btn) {
-  if (!confirm(`Delete meeting ${id}?`)) return;
-  await apiFetch(`/api/meetings/${id}`, {method:'DELETE'});
-  btn.closest('.panel').remove();
-}
-
-// ── Meeting detail ─────────────────────────────────────────────────
-async function renderMeeting(meetingId) {
-  const data = await api(`/api/meetings/${meetingId}`);
-  const main = document.getElementById('main');
-  const participants = data.participants || {};
-  const transcript   = data.transcript  || [];
-  const actions      = data.actions || [];
-  const lastResp = {};
-  for (const e of transcript) { if (e.speaker !== 'moderator') lastResp[e.speaker] = e.content || ''; }
-
-  main.innerHTML = `
-    <button class="back-btn" onclick="nav('meetings')">← Meetings</button>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
-      <span style="font-size:13px;font-weight:600;color:var(--cyan)">◎ ${esc(data.name||meetingId)}</span>
-      <span style="color:var(--muted);font-size:10px;font-family:var(--mono)">${esc(meetingId)}</span>
-      <span class="meeting-status ${data.closed_at?'closed':'open'}">${data.closed_at?'closed':'open'}</span>
-      ${data.agenda ? `<span style="color:var(--muted);font-size:12px">${esc(data.agenda)}</span>` : ''}
-      <button class="del-btn" style="margin-left:auto" onclick="deleteMeetingNav('${meetingId}')">Delete</button>
-    </div>
-    <div class="participants-grid">
-      ${Object.values(participants).map(p=>`
-        <div class="participant-card ${lastResp[p.name]?'spoke':''}">
-          <div class="p-name">${esc(p.name)}</div>
-          <div class="p-role">${esc(p.role||'')}</div>
-          <div class="p-response">${lastResp[p.name]?esc(lastResp[p.name]):'<em style="color:var(--muted)">has not spoken</em>'}</div>
-        </div>`).join('')}
-    </div>
-    ${data.notes ? `<div class="notes-box">${esc(data.notes)}</div>` : ''}
-    ${renderMeetingActions(actions, transcript)}
-    ${data.conclusion ? `<div class="conclusion-box">${esc(data.conclusion)}</div>` : ''}`;
-}
-
-function renderMeetingActions(actions, transcript) {
-  if (actions && actions.length) {
-    return `
-      <div class="section-title" style="margin-top:12px">Moderator Actions (${actions.length})</div>
-      <div class="meeting-actions">${actions.map(renderMeetingAction).join('')}</div>`;
-  }
-  if (!transcript || !transcript.length) return '';
-  return `
-    <div class="section-title" style="margin-top:12px">Meeting Activity (${transcript.length})</div>
-    <div class="meeting-actions">
-      ${transcript.map(e => `
-        <div class="meeting-action">
-          <div class="a-head">
-            <span class="a-type">${e.speaker === 'moderator' ? 'moderator note' : 'participant response'}</span>
-            <span class="a-time">${esc(e.timestamp || '')}</span>
-          </div>
-          <div class="meeting-response">
-            <div class="speaker">${esc(e.speaker || '')}${e.round ? ` · round ${esc(e.round)}` : ''}</div>
-            <div class="a-body">${esc(e.content || '')}</div>
-          </div>
-        </div>`).join('')}
-    </div>`;
-}
-
-function renderMeetingAction(action) {
-  const type = action.action || 'action';
-  const time = action.time || '';
-  let body = '';
-  if (type === 'create_participants') {
-    const participants = action.participants || [];
-    body = `<div class="a-meta">${participants.length} participant(s)</div>` +
-      participants.map(p => `<div class="meeting-response"><div class="speaker">${esc(p.name || '')}</div><div class="a-body">${esc(p.role || '')}</div></div>`).join('');
-  } else if (type === 'set_agenda') {
-    body = `<div class="a-body">${esc(action.agenda || '')}</div>`;
-  } else if (type === 'add_notes') {
-    body = `<div class="a-body">${esc(action.content || '')}</div>`;
-  } else if (type === 'ask_one') {
-    body = `<div class="a-meta">Question to ${esc(action.participant || '')}</div>
-      <div class="a-body">${esc(action.question || '')}</div>
-      <div class="meeting-response"><div class="speaker">${esc(action.participant || '')}</div><div class="a-body">${esc(action.response || '')}</div></div>`;
-  } else if (type === 'chain' || type === 'group_discuss') {
-    const label = type === 'chain' ? 'Sequential chain' : 'Group discussion';
-    const prompt = action.prompt || action.topic || '';
-    const rounds = action.round_results || [];
-    body = `<div class="a-meta">${label} · ${esc(action.rounds || rounds.length || '')} round(s)</div>
-      <div class="a-body">${esc(prompt)}</div>
-      ${rounds.map((round, idx) => {
-        const roundNo = round.round || idx + 1;
-        const responses = round.responses || round || [];
-        return `<div class="a-meta" style="margin-top:8px">Round ${esc(roundNo)}</div>` +
-          responses.map(r => `<div class="meeting-response"><div class="speaker">${esc(r.speaker || '')}</div><div class="a-body">${esc(r.content || '')}</div></div>`).join('');
-      }).join('')}`;
-  } else if (type === 'conclude') {
-    body = `<div class="a-body">${esc(action.conclusion || '')}</div>`;
-  } else {
-    body = `<div class="a-body">${esc(JSON.stringify(action, null, 2))}</div>`;
-  }
-  return `
-    <div class="meeting-action">
-      <div class="a-head">
-        <span class="a-type">${esc(type.replace(/_/g, ' '))}</span>
-        <span class="a-time">${esc(time)}</span>
-      </div>
-      ${body}
-    </div>`;
-}
-
-function deleteMeetingNav(id) {
-  if (!confirm(`Delete meeting ${id}?`)) return;
-  apiFetch(`/api/meetings/${id}`, {method:'DELETE'}).then(() => nav('meetings'));
 }
 
 // ── Costs ──────────────────────────────────────────────────────────
@@ -1311,17 +1137,14 @@ async function renderCosts() {
 function updateTopbar(data) {
   setText('tb-sessions', data.session_count);
   setText('tb-boards', `${data.active_board_count}/${data.board_count}`);
-  setText('tb-meetings', `${data.open_meeting_count}/${data.meeting_count}`);
   setText('tb-cost', `$${(data.total_cost||0).toFixed(4)}`);
 }
 function updateSidebarLive(data) {
-  const talks = data.main_sessions||[], ab = data.active_boards||[], om = data.open_meetings||[];
+  const talks = data.main_sessions||[], ab = data.active_boards||[];
   const ts = document.getElementById('talks-section');
   const tn = document.getElementById('talks-nav');
   const bs = document.getElementById('active-boards-section');
   const bn = document.getElementById('active-boards-nav');
-  const ms = document.getElementById('open-meetings-section');
-  const mn = document.getElementById('open-meetings-nav');
   ts.style.display = talks.length ? '' : 'none';
   tn.innerHTML = talks.map(s=>`
     <div class="nav-item${s.id === _chatSessionId ? ' active' : ''}" onclick="openTalk('${s.id}')">
@@ -1330,8 +1153,6 @@ function updateSidebarLive(data) {
     </div>`).join('');
   bs.style.display = ab.length ? '' : 'none';
   bn.innerHTML = ab.map(b=>`<div class="nav-item" onclick="nav('board','${b.name}')"><span class="nav-icon">⊞</span>${esc(b.name)}<span class="badge">${(b.status_counts||{}).running||0}</span></div>`).join('');
-  ms.style.display = om.length ? '' : 'none';
-  mn.innerHTML = om.map(m=>`<div class="nav-item" onclick="nav('meeting','${m.meeting_id}')"><span class="nav-icon">◎</span>${esc((m.name||m.meeting_id||'').slice(0,18))}</div>`).join('');
 }
 
 // ── SSE live updates ─────────────────────────────────────────────────

@@ -14,15 +14,9 @@ from .env import load_dotenv
 from .ui import ConsoleUI
 
 
-_TOOL_SUBAGENT_EXCLUDED = {
+_SUB_AGENT_EXCLUDED = {
     "tool_subagent",
-    "meeting_create_participants",
-    "meeting_set_agenda",
-    "meeting_add_notes",
-    "meeting_ask_one",
-    "meeting_chain",
-    "meeting_group_discuss",
-    "meeting_conclude",
+    "memory",
     "kanban_create_task",
     "kanban_list_tasks",
     "kanban_show_task",
@@ -31,7 +25,6 @@ _TOOL_SUBAGENT_EXCLUDED = {
     "kanban_dispatch",
     "kanban_notify_subscribe",
     "kanban_create_pipeline",
-    "kanban_create_meeting_task",
     "kanban_list_boards",
 }
 
@@ -121,24 +114,16 @@ def _start_parent_monitor(cache_path: Path) -> None:
     threading.Thread(target=_monitor, daemon=True, name="parent-process-monitor").start()
 
 
-def _load_extra_tools(extra_tools: list[str]) -> None:
-    """Register optional tool sets requested by the task payload."""
-    for name in extra_tools:
-        if name == "meeting":
-            from .tools.meeting import register_moderator_tools
-            register_moderator_tools()
-
-
 def _run_agent(payload: dict[str, Any], cache_path: Path) -> None:
     prompt = str(payload.get("user_prompt") or "")
-    _load_extra_tools(payload.get("extra_tools") or [])
-    agent_role = str(payload.get("agent_role") or "tool_subagent")
+    agent_role = str(payload.get("agent_role") or "sub_agent")
     auto_compact = bool(payload.get("auto_compact", True))
-    registry = None
-    if agent_role == "tool_subagent":
-        from .tools import load_builtin_tools, registry as global_registry
-        load_builtin_tools()
-        registry = global_registry.without(_TOOL_SUBAGENT_EXCLUDED)
+    from .tools import load_builtin_tools, registry as global_registry
+    load_builtin_tools()
+    # Every spawned sub-agent (kanban worker or tool_subagent) is a single narrow
+    # identity with the same restricted toolset -- it can't create more Kanban
+    # tasks, dispatch, or spawn further subagents. Only the main agent orchestrates.
+    registry = global_registry.without(_SUB_AGENT_EXCLUDED)
     agent = GeneralAgent(
         model=payload.get("model"),
         provider=payload.get("provider"),

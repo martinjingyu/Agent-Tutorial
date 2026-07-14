@@ -13,10 +13,7 @@ VALID_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9./._-]*$")
 ALLOWED_SUBDIRS = {"references", "templates", "scripts", "assets"}
 VALID_AUDIENCES = {
     "main",
-    "kanban_worker",
-    "tool_subagent",
-    "meeting_moderator",
-    "participant",
+    "sub_agent",
     "self_review",
     "all",
     "*",
@@ -117,7 +114,7 @@ def _validate_skill_content(content: str) -> str | None:
         return "frontmatter must include name and description"
     audiences = _audience_values(frontmatter)
     if not audiences:
-        return "frontmatter must include audience; use one or more of: main, kanban_worker, tool_subagent, meeting_moderator, participant, self_review, all"
+        return "frontmatter must include audience; use one or more of: main, sub_agent, self_review, all"
     invalid = sorted(audiences - VALID_AUDIENCES)
     if invalid:
         return f"frontmatter audience contains unknown role(s): {', '.join(invalid)}"
@@ -309,8 +306,8 @@ registry.register(
     {
         "description": (
             "Create or update project-local skills, which are procedural memory for reusable task classes. "
-            "Every SKILL.md must declare frontmatter audience with valid roles: main, kanban_worker, "
-            "tool_subagent, meeting_moderator, participant, self_review, or all. "
+            "Every SKILL.md must declare frontmatter audience with valid roles: main, sub_agent, "
+            "self_review, or all. "
             "Only agent_role=main may modify skills whose audience includes main, all, or *. "
             "Prefer improving existing skills over creating new ones. Use patch for small SKILL.md changes; "
             "use edit only for major full rewrites after reading the current skill. Use write_file for "

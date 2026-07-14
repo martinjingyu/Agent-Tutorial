@@ -10,9 +10,6 @@ Endpoints:
   GET  /api/kanban                 — list boards
   GET  /api/kanban/{board}         — board + tasks + worker outputs
   DELETE /api/kanban/{board}       — delete board and worker files
-  GET  /api/meetings               — list meetings
-  GET  /api/meetings/{id}          — meeting detail + full transcript
-  DELETE /api/meetings/{id}        — delete meeting file
   GET  /api/costs                  — cost breakdown by model / session
   POST /api/chat                   — send message to agent (returns session_id)
   GET  /api/chat/{session_id}/stream — SSE stream for live agent output
@@ -43,7 +40,6 @@ app.add_middleware(
 
 STATIC_DIR   = Path(__file__).parent / "static"
 KANBAN_DIR   = SESSIONS_DIR / "kanban"
-MEETINGS_DIR = SESSIONS_DIR / "meetings"
 
 # ── Token pricing (USD per million tokens) ────────────────────────────────
 
@@ -59,6 +55,10 @@ _PRICE: dict[str, dict[str, float]] = {
     "gpt-4o-mini":          {"in": 0.15,  "out": 0.60},
     "gpt-4o":               {"in": 2.50,  "out": 10.00},
     "gpt-5.4":              {"in": 2.50,  "out": 10.00},
+    "gpt-5.5":              {"in": 2.50,  "out": 10.00},
+    # Codex-quota calls (authenticated via `codex login`) are not token-billed.
+    "codex-5.4":            {"in": 0.0,   "out": 0.0},
+    "codex-5.5":            {"in": 0.0,   "out": 0.0},
 }
 
 def _price_per_million(model: str) -> dict[str, float]:
@@ -111,19 +111,8 @@ def _usage_by_session() -> dict[str, dict]:
 
 # ── Data readers ──────────────────────────────────────────────────────────
 
-def _session_fingerprint(msgs: list) -> tuple | None:
-    """(msg_count, first_user_content_prefix) — unique enough to match a session."""
-    if not msgs:
-        return None
-    user_msgs = [m for m in msgs if isinstance(m, dict) and m.get("role") == "user"]
-    if not user_msgs:
-        return None
-    first = str(user_msgs[0].get("content") or "")[:300]
-    return (len(msgs), first)
-
-
 def _sub_session_ids() -> set[str]:
-    """Session IDs that belong to kanban sub-agents or meeting participants."""
+    """Session IDs that belong to kanban sub-agents."""
     ids: set[str] = set()
 
     # Kanban worker caches
@@ -137,51 +126,6 @@ def _sub_session_ids() -> set[str]:
                     ids.add(str(d["session_id"]))
             except Exception:
                 pass
-
-    # Meeting participant sessions
-    meetings_dir = SESSIONS_DIR / "meetings"
-    if not meetings_dir.exists():
-        return ids
-
-    # Collect participant histories that need fingerprint matching
-    needs_match: list[list] = []
-    for mf in meetings_dir.glob("mtg_*.json"):
-        try:
-            d = _read_json(mf)
-            if not isinstance(d, dict):
-                continue
-            for p in d.get("participants", {}).values():
-                if not isinstance(p, dict):
-                    continue
-                if p.get("session_id"):
-                    # New-style: session_id already stored
-                    ids.add(str(p["session_id"]))
-                elif p.get("session_history"):
-                    # Old-style: need fingerprint match
-                    needs_match.append(p["session_history"])
-        except Exception:
-            pass
-
-    if not needs_match:
-        return ids
-
-    # Build fingerprint → session_id map from all session files
-    fp_map: dict[tuple, str] = {}
-    for sf in SESSIONS_DIR.glob("*.json"):
-        try:
-            msgs = _read_json(sf)
-            if not isinstance(msgs, list):
-                continue
-            fp = _session_fingerprint(msgs)
-            if fp:
-                fp_map[fp] = sf.stem
-        except Exception:
-            pass
-
-    for history in needs_match:
-        fp = _session_fingerprint(history)
-        if fp and fp in fp_map:
-            ids.add(fp_map[fp])
 
     return ids
 
@@ -345,35 +289,6 @@ def _board_detail(board_name: str) -> dict | None:
     return {**data, "tasks": tasks}
 
 
-def _list_meetings() -> list[dict]:
-    meetings = []
-    if not MEETINGS_DIR.exists():
-        return meetings
-    for f in sorted(MEETINGS_DIR.glob("mtg_*.json"), reverse=True):
-        data = _read_json(f)
-        if not isinstance(data, dict):
-            continue
-        mid = data.get("meeting_id") or ""
-        meetings.append({
-            "meeting_id":        mid,
-            "name":              data.get("name") or mid,
-            "created_at":        data.get("created_at"),
-            "closed_at":         data.get("closed_at"),
-            "agenda":            data.get("agenda") or "",
-            "participant_count": len(data.get("participants") or {}),
-            "participants":      list((data.get("participants") or {}).keys()),
-            "has_conclusion":    bool(data.get("conclusion")),
-        })
-    return meetings
-
-
-def _meeting_detail(meeting_id: str) -> dict | None:
-    path = MEETINGS_DIR / f"{meeting_id}.json"
-    if not path.exists():
-        return None
-    return _read_json(path)
-
-
 def _cost_summary() -> dict:
     rows = _read_jsonl(SESSIONS_DIR / "usage_log.jsonl")
     total_in = total_out = 0
@@ -496,14 +411,6 @@ def _auto_resume_session(session_id: str, wake: dict) -> None:
         content = f"[kanban notification] Board '{board}' pipeline_complete."
         if extra:
             content += f"\n\nRequested follow-up: {extra}"
-        if wake.get("has_meeting_task"):
-            content += (
-                "\n\nMeeting follow-up rule:\n"
-                "- Treat the meeting result as planning input for the next phase.\n"
-                "- Review the conclusion, then create downstream Kanban tasks or a Kanban pipeline for substantial deliverables.\n"
-                "- Do not perform the downstream worker work inline in this resumed turn unless the user explicitly asked for direct execution.\n"
-                "- After dispatching follow-up Kanban work, subscribe to completion notifications and respond_to_user."
-            )
         pending_msgs = [{"role": "user", "content": content}]
 
     trigger_message = "\n\n".join(m["content"] for m in pending_msgs)
@@ -574,20 +481,16 @@ async def dashboard() -> HTMLResponse:
 async def overview() -> dict:
     sessions = _list_sessions()
     boards   = _list_boards()
-    meetings = _list_meetings()
     costs    = _cost_summary()
     return {
         "session_count":      len(sessions),
         "active_board_count": sum(1 for b in boards if b["has_active"]),
         "board_count":        len(boards),
-        "meeting_count":      len(meetings),
-        "open_meeting_count": sum(1 for m in meetings if not m["closed_at"]),
         "total_cost":         costs["total_cost"],
         "total_in_tokens":    costs["total_in"],
         "total_out_tokens":   costs["total_out"],
         "recent_sessions":    sessions[:8],
         "active_boards":      [b for b in boards if b["has_active"]],
-        "open_meetings":      [m for m in meetings if not m["closed_at"]],
         "active_talks":       [s for s in sessions if s["is_active"] and not s["is_sub"]],
         "main_sessions":      [s for s in sessions if not s["is_sub"]],
     }
@@ -738,30 +641,6 @@ async def cancel_kanban_task(board_name: str, task_id: str) -> dict:
     _event(data, "task_cancelled", task_id=task_id, pid=pid, error=task["error"])
     _save_board(data, board_name)
     return {"ok": True, "board": board_name, "task_id": task_id, "pid": pid}
-
-
-# ── Meetings ──────────────────────────────────────────────────────────────
-
-@app.get("/api/meetings")
-async def list_meetings() -> list:
-    return _list_meetings()
-
-
-@app.get("/api/meetings/{meeting_id}")
-async def get_meeting(meeting_id: str) -> dict:
-    d = _meeting_detail(meeting_id)
-    if d is None:
-        raise HTTPException(status_code=404, detail="Meeting not found")
-    return d
-
-
-@app.delete("/api/meetings/{meeting_id}")
-async def delete_meeting(meeting_id: str) -> dict:
-    path = MEETINGS_DIR / f"{meeting_id}.json"
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Meeting not found")
-    path.unlink()
-    return {"ok": True}
 
 
 # ── Costs ─────────────────────────────────────────────────────────────────
@@ -928,7 +807,6 @@ async def sse_events() -> StreamingResponse:
         while True:
             try:
                 boards   = _list_boards()
-                meetings = _list_meetings()
                 costs    = _cost_summary()
                 active_board_details = []
                 for b in boards:
@@ -941,8 +819,6 @@ async def sse_events() -> StreamingResponse:
                     _recently_resumed.clear()
                 data = {
                     "boards":           active_board_details,
-                    "meetings":         [_meeting_detail(m["meeting_id"]) for m in meetings
-                                         if not m["closed_at"] and m["meeting_id"]],
                     "cost":             costs["total_cost"],
                     "resumed_sessions": resumed,
                     "active_talks":      [s for s in _list_sessions() if s["is_active"] and not s["is_sub"]],

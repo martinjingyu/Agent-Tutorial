@@ -65,7 +65,7 @@ def _start(kind: str, args: dict, runtime: dict) -> str:
         "auto_compact": args.get("auto_compact", True),
         "user_prompt": args.get("user_prompt") or args.get("prompt") or "",
         "system_prompt": "",
-        "agent_role": "tool_subagent",
+        "agent_role": "sub_agent",
     }
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
@@ -93,7 +93,7 @@ registry.register("tool_subagent", {
     "description": (
         "Start a restricted backend helper sub-agent subprocess with a user_prompt. "
         "Returns immediately with a cache_path. This is for narrow independent helper work; "
-        "by default the sub-agent cannot spawn more subagents, manage Kanban, or run meetings. "
+        "the sub-agent cannot spawn more subagents or manage Kanban. "
         "It writes live session status, messages, and final result to that cache file."
     ),
     "parameters": {

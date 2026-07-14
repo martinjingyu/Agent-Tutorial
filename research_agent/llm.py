@@ -177,9 +177,9 @@ def _make_tool_call(call_id: str, name: str, arguments: str) -> SimpleNamespace:
     )
 
 
-def _chat_completion_like(content: str | None, tool_calls: list[SimpleNamespace]) -> SimpleNamespace:
+def _chat_completion_like(content: str | None, tool_calls: list[SimpleNamespace], usage: Any = None) -> SimpleNamespace:
     message = SimpleNamespace(content=content, tool_calls=tool_calls)
-    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
 
 
 # Models that should be silently upgraded to deepseek-v4-flash
@@ -314,14 +314,25 @@ class LLMClient:
         return status == 429 or "rate limit" in str(exc).lower()
 
     def _codex_retry(self, fn):
+        # The Codex/ChatGPT backend intermittently drops the streaming connection
+        # mid-request ("Server disconnected without sending a response"), especially
+        # on turns carrying a bulky tool result (browser snapshots, search results).
+        # Without retrying those the same way _with_retry does for every other
+        # provider, a transient disconnect crashes the whole agent run.
         max_retries = int(get_env("CODEX_MAX_RETRIES", "8"))
         retry_sleep = float(get_env("CODEX_RETRY_SLEEP", "3.5"))
         for attempt in range(max_retries + 1):
             try:
                 return fn()
             except Exception as exc:
-                if self._codex_is_rate_limit(exc) and attempt < max_retries:
+                if attempt >= max_retries:
+                    raise
+                if self._codex_is_rate_limit(exc):
                     print(f"[Codex] 429 rate limit; retrying in {retry_sleep}s ({attempt + 1}/{max_retries})...")
+                    time.sleep(retry_sleep)
+                    continue
+                if self._is_transient(exc):
+                    print(f"[Codex] transient error ({type(exc).__name__}); retrying in {retry_sleep}s ({attempt + 1}/{max_retries})...")
                     time.sleep(retry_sleep)
                     continue
                 raise
@@ -385,6 +396,6 @@ class LLMClient:
                     )
 
             content = "".join(text_parts) or getattr(final, "output_text", "") or None
-            return _chat_completion_like(content, tool_calls)
+            return _chat_completion_like(content, tool_calls, usage=getattr(final, "usage", None))
 
         return self._codex_retry(run_once)

@@ -42,6 +42,14 @@ COMPACT_AFTER_FINAL_TOOL_COUNT = 8
 the agent will compact before executing the next batch of tool calls."""
 
 
+def _display_model_name(model: str, provider: str) -> str:
+    """Distinguish Codex-quota calls (free) from token-billed API calls with the
+    same underlying model name, e.g. "gpt-5.5" via codex -> "codex-5.5"."""
+    if provider == "codex" and model.startswith("gpt-"):
+        return "codex-" + model[len("gpt-"):]
+    return model
+
+
 def _log_usage(response: Any, model: str, provider: str, session_id: str) -> None:
     """Append one line to sessions/usage_log.jsonl with token counts from this LLM call."""
     try:
@@ -56,7 +64,7 @@ def _log_usage(response: Any, model: str, provider: str, session_id: str) -> Non
         entry = json.dumps({
             "ts":         datetime.now().isoformat(timespec="seconds"),
             "session_id": session_id,
-            "model":      model,
+            "model":      _display_model_name(model, provider),
             "provider":   provider,
             "in":         in_tok,
             "out":        out_tok,
@@ -227,7 +235,7 @@ class GeneralAgent:
         self.ui = ui or ConsoleUI(enabled=True)
         self.session_id = session_id or new_session_id()
         self._sub_agent = sub_agent
-        self.agent_role = agent_role or ("tool_subagent" if sub_agent else "main")
+        self.agent_role = agent_role or ("sub_agent" if sub_agent else "main")
         self.task_id = f"task_{uuid.uuid4().hex[:8]}"
         self._spill_dir = SESSIONS_DIR / ".tool_cache" / self.session_id
         self._spill_counter = 0
@@ -716,7 +724,9 @@ class GeneralAgent:
         if self._session_path:
             session_path = self._session_path
         else:
-            session_path = save_session(self.session_id, messages, sub_agent=self._sub_agent)
+            session_path = save_session(
+                self.session_id, messages, sub_agent=self._sub_agent, system_prompt=system_prompt
+            )
         self._write_live_cache("completed", messages, final_text=final_text, session_path=str(session_path))
         self.ui.final_answer(final_text, iteration)
         self.ui.saved(str(session_path))

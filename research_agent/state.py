@@ -17,12 +17,16 @@ def save_session(
     messages: list[dict[str, Any]],
     *,
     sub_agent: bool = False,
+    system_prompt: str | None = None,
 ) -> Path:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     path = SESSIONS_DIR / f"{session_id}.json"
     data: Any = messages
-    if sub_agent:
-        data = [{"__meta__": True, "sub_agent": True}, *messages]
+    if sub_agent or system_prompt is not None:
+        meta: dict[str, Any] = {"__meta__": True, "sub_agent": sub_agent}
+        if system_prompt is not None:
+            meta["system_prompt"] = system_prompt
+        data = [meta, *messages]
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return path
 

@@ -77,14 +77,6 @@ def _task_id(prefix: str = "t") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
-def _new_board_name(prefix: str, seed: str) -> str:
-    import re
-
-    slug = re.sub(r"[^\w\s.-]", "", seed.lower()).strip()
-    slug = re.sub(r"[\s_]+", "-", slug).strip("-")[:48].rstrip("-")
-    return f"{prefix}-{slug or uuid.uuid4().hex[:8]}-{uuid.uuid4().hex[:4]}"
-
-
 def _cache_paths(board: str, task_id: str) -> tuple[Path, Path, Path]:
     root = KANBAN_DIR / board / "workers"
     cache_path = root / f"{task_id}.json"
@@ -115,7 +107,7 @@ def _spawn_worker(task: dict[str, Any], board: str, runtime: dict[str, Any]) -> 
         "auto_compact": task.get("auto_compact", True),
         "user_prompt": prompt,
         "system_prompt": "",
-        "agent_role": "meeting_moderator" if str(task.get("skill") or "") == "meeting_moderator" else "kanban_worker",
+        "agent_role": "sub_agent",
         "extra_tools": task.get("extra_tools") or [],
         # Auto-advance: worker uses these to push the board forward on completion
         "kanban_board": board,
@@ -826,408 +818,6 @@ def _handle_dispatch(args: dict, runtime: dict) -> str:
     )
 
 
-def _handle_create_meeting_task(args: dict, runtime: dict) -> str:
-    title        = str(args.get("title") or "").strip()
-    topic        = str(args.get("topic") or "").strip()
-    board_name   = str(args.get("board") or _new_board_name("meeting", title or topic))
-    participants = args.get("suggested_participants") or []
-    if not title or not topic:
-        return json_result(success=False, error="title and topic are required")
-
-    # Build moderator prompt from topic + participant suggestions
-    parts = [f"Topic: {topic}"]
-    if participants:
-        lines = "\n".join(f"  - {p}" for p in participants)
-        parts.append(f"Suggested participants:\n{lines}")
-    parts.append(
-        "You are the meeting moderator. Load the meeting_moderator skill, "
-        "then create the participants and run the discussion as you see fit. "
-        "End with meeting_conclude. Do not create downstream implementation tasks; "
-        "the main scheduling agent will review the conclusion and create any follow-up Kanban work."
-    )
-    prompt = "\n\n".join(parts)
-
-    data = _load_board(board_name)
-    task = _create_task(
-        data,
-        title=title,
-        prompt=prompt,
-        skill="meeting_moderator",
-        parents=[str(x) for x in (args.get("parents") or [])],
-        status=str(args.get("status") or "ready"),
-        max_iterations=args.get("max_iterations") or 30,
-        provider=args.get("provider"),
-        model=args.get("model"),
-        auto_compact=args.get("auto_compact"),
-        extra_tools=["meeting"],   # always included 鈥?moderator needs meeting tools
-    )
-    _save_board(data, board_name)
-    return json_result(
-        success=True,
-        board=board_name,
-        task=task,
-        hint=(
-            "Meeting task created with meeting tools pre-enabled. Call kanban_dispatch to start. "
-            "After the meeting board completes, review the conclusion and create downstream Kanban tasks "
-            "instead of doing the deliverable work inline."
-        ),
-    )
-
-
-registry.register("kanban_create_meeting_task", {
-    "description": (
-        "Create a kanban task that runs a meeting moderator agent. "
-        "The moderator decides the discussion format dynamically (ask_one / chain / group_discuss). "
-        "You only need to specify the topic and optionally suggest participants 鈥?"
-        "the moderator handles everything else. Meeting tools are enabled automatically."
-    ),
-    "parameters": {
-        "type": "object",
-            "properties": {
-            "board":   {"type": "string", "description": "Optional board name. If omitted, a new meeting-specific board is created automatically."},
-            "title":   {"type": "string", "description": "Short task title for the kanban board"},
-            "topic":   {"type": "string", "description": "What the meeting should resolve or discuss"},
-            "suggested_participants": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Optional list of participant descriptions, e.g. ['Alice: software architect', 'Bob: security expert']. The moderator may adjust.",
-            },
-            "parents":        {"type": "array", "items": {"type": "string"}, "description": "Task IDs this meeting depends on"},
-            "status":         {"type": "string", "enum": ["ready", "todo", "blocked"], "default": "ready"},
-            "max_iterations": {"type": "integer", "default": 30},
-            "auto_compact": {
-                "type": "boolean",
-                "default": True,
-                "description": "Whether the moderator worker may auto-compact its context.",
-            },
-            "provider":       {"type": "string"},
-            "model":          {"type": "string"},
-        },
-        "required": ["title", "topic"],
-    },
-}, _handle_create_meeting_task)
-
-
-def _slug(text: str, max_len: int = 60) -> str:
-    import re
-    text = text.lower().strip()
-    text = re.sub(r"[^\w\s-]", "", text)
-    text = re.sub(r"[\s_]+", "-", text)
-    return text.strip("-")[:max_len].rstrip("-") or "topic"
-
-
-RESEARCH_DEFAULT_PARTICIPANTS = [
-    "Framer: Problem Framer / chair. Turns the vague topic into a structured research question - "
-    "defines setting, benchmark, evaluation protocol, and assumptions. Output is a research-space "
-    "definition, not an idea.",
-    "Scout: Literature Scout. Uses browser/search tools to find the closest prior work, clusters it "
-    "(not a flat list), and explicitly names saturated areas vs underexplored gaps. Must cite what it found.",
-    "Generator: Idea Generator (divergent). Produces 5-8 concrete research directions. Each idea MUST "
-    "be a fenced json block with keys: name, mechanism, intuition, extends, expected_gain, risk. "
-    "Ideas without this structure will not be scored.",
-    "Skeptic: Adversarial Reviewer. For each idea INDIVIDUALLY (never batched), finds prior-art overlap, "
-    "triviality, and evaluation-feasibility problems, and tags it: already-known / unclear-novelty / "
-    "hard-to-evaluate / promising / high-novelty. Job is to kill weak ideas, not to be agreeable.",
-    "Realist: Systems Realist. For each surviving idea, judges compute cost, data requirements, and "
-    "engineering feasibility for a small-lab/single-researcher budget. Kills ideas needing infeasible scale.",
-    "Synthesizer: Final ranking. Scores surviving ideas on novelty/feasibility/evaluability/expected impact "
-    "(high/medium/low each) and produces a justified top 1-3 ranking.",
-]
-
-
-def _research_meeting_prompt(
-    topic: str,
-    constraints: str,
-    participants: list[str],
-    report_path: str,
-    *,
-    selected_idea: str = "",
-    deepen_from_report: str = "",
-    iteration: int = 1,
-) -> str:
-    participant_lines = "\n".join(f"  - {p}" for p in participants)
-    constraints_block = f"\nConstraints: {constraints}\n" if constraints else ""
-
-    if selected_idea and deepen_from_report:
-        # Deepening mode: narrow the whole meeting to ONE previously-selected direction instead
-        # of generating fresh divergent ideas. This is the iteration loop step - research quality
-        # comes from repeatedly narrowing on a human-chosen direction, not from one big brainstorm.
-        return f"""Research DEEPENING meeting (iteration {iteration}).
-
-Original topic: {topic}
-Direction selected by the human to deepen: {selected_idea}
-{constraints_block}
-Prior report (read this FIRST): {deepen_from_report}
-
-Suggested participants:
-{participant_lines}
-
-You are the meeting moderator. Load the meeting_moderator skill for tool mechanics (meeting_ask_one /
-meeting_chain / meeting_group_discuss / meeting_conclude), but follow THIS phase protocol instead of
-choosing your own format - it is mandatory, not optional:
-
-0. read_file the prior report at {deepen_from_report} so every participant turn can reference it via
-   meeting_add_notes. Do NOT re-run open brainstorming on the whole topic - the human already chose
-   "{selected_idea}"; your job is to deepen it, not replace it.
-1. Framing: meeting_ask_one to Framer to narrow the research-space definition specifically to
-   "{selected_idea}" (concrete setting, benchmark, evaluation, assumptions for THIS mechanism only).
-2. Scouting: meeting_ask_one to Scout for a DEEPER, more specific search validating or refuting the
-   exact mechanism in "{selected_idea}" (not the broad topic). Add findings via meeting_add_notes.
-3. Generation: meeting_ask_one or meeting_chain to Generator for 3-5 REFINEMENTS of the selected idea
-   only (alternate formalizations, ablations, or stronger variants) - not fresh unrelated ideas. Same
-   per-idea JSON format (mechanism, intuition, extends, expected_gain, risk).
-4. Adversarial review (CRITICAL - do not skip or batch this): meeting_ask_one to Skeptic ONCE PER
-   REFINEMENT, stress-testing harder than a first-pass review since this direction already survived one
-   round. Then meeting_ask_one to Realist ONCE PER SURVIVING REFINEMENT. Drop anything that does not
-   hold up.
-5. Synthesis: meeting_ask_one to Synthesizer - the question now is "is this ready for experiments", not
-   "which of many ideas wins". Ask for the single tightest formalized version plus a clear go/no-go
-   verdict.
-6. Before concluding, use write_file to save the report to exactly this path: {report_path}
-   Include a "Lineage" section at the top: original topic, selected direction, and a pointer back to
-   {deepen_from_report}.
-7. Call meeting_conclude with the tightened direction and go/no-go verdict. This ends your loop - do
-   not call respond_to_user.
-
-Do not create downstream implementation tasks yourself; a follow-up worker will formalize the result
-into a method design.
-
-When calling meeting_create_participants, do NOT set a model or provider for any participant - leave
-those fields unset so every participant uses the default model.
-"""
-
-    return f"""Research ideation meeting.
-
-Research area / question: {topic}
-{constraints_block}
-Suggested participants:
-{participant_lines}
-
-You are the meeting moderator. Load the meeting_moderator skill for tool mechanics (meeting_ask_one /
-meeting_chain / meeting_group_discuss / meeting_conclude), but follow THIS phase protocol instead of
-choosing your own format - it is mandatory for research ideation, not optional:
-
-1. Framing: meeting_ask_one to Framer for a structured research-space definition (setting, benchmark,
-   evaluation, assumptions). Adopt the result via meeting_set_agenda.
-2. Scouting: meeting_ask_one to Scout. Scout must use browser/search tools to find real prior work,
-   cluster it, and name concrete gaps. Add the result via meeting_add_notes.
-3. Generation: meeting_ask_one or meeting_chain to Generator for 5-8 ideas in the required per-idea
-   JSON format.
-4. Adversarial review (CRITICAL - do not skip or batch this): call meeting_ask_one to Skeptic ONCE PER
-   IDEA, not all ideas at once. Then call meeting_ask_one to Realist ONCE PER SURVIVING IDEA. Drop any
-   idea tagged already-known or infeasible - do not carry it into synthesis.
-5. Synthesis: meeting_ask_one to Synthesizer with the surviving ideas plus their Skeptic/Realist
-   verdicts. Ask for a scored, justified top 1-3 ranking.
-6. Before concluding, use write_file to save the full report (research question, surviving ideas with
-   verdicts, final ranking) to exactly this path: {report_path}
-7. Call meeting_conclude with the ranked top 1-3 ideas and justification. This ends your loop -
-   do not call respond_to_user.
-
-Do not create downstream implementation tasks yourself; a follow-up review will judge whether this
-result has converged. If the human later wants to go deeper on ONE of these ideas outside that
-automatic loop, call kanban_create_research_pipeline again with selected_idea and deepen_from_report
-set to this report path - do not just re-run a fresh open brainstorm on the same topic.
-
-When calling meeting_create_participants, do NOT set a model or provider for any participant - leave
-those fields unset so every participant uses the default model.
-"""
-
-
-def _review_prompt(
-    topic: str,
-    report_path: str,
-    iteration: int,
-    max_loop_iterations: int,
-    constraints: str,
-    board_name: str,
-) -> str:
-    constraints_block = f"\nConstraints: {constraints}\n" if constraints else ""
-    next_iteration = iteration + 1
-    can_iterate = next_iteration <= max_loop_iterations
-
-    if can_iterate:
-        not_converged_block = f"""If NOT converged (this is iteration {iteration}/{max_loop_iterations}, budget remains):
-1. Identify the ONE most important unresolved issue or most promising remaining direction from the
-   report - the single thing worth deepening next. Do not try to fix everything at once.
-2. Call kanban_create_research_pipeline with:
-   - board: "{board_name}"
-   - topic: "{topic}"
-   - selected_idea: <the specific direction/fix to deepen, written in your own words>
-   - deepen_from_report: "{report_path}"
-   - iteration: {next_iteration}
-   - max_loop_iterations: {max_loop_iterations}
-   - constraints: the same constraints as this run, if any
-3. Finish with respond_to_user stating: verdict=NEEDS-ITERATION, the issue you are sending back for
-   another round, and the new iteration number spawned. Do not call kanban_dispatch yourself - the
-   new task is spawned automatically once you finish."""
-    else:
-        not_converged_block = f"""If NOT converged: this is the last allowed iteration ({iteration}/{max_loop_iterations}) - the loop
-budget is exhausted. Do NOT call kanban_create_research_pipeline. Finish with respond_to_user stating:
-verdict=BUDGET-EXHAUSTED, and clearly list every unresolved issue so a human can decide whether to
-continue manually (by calling kanban_create_research_pipeline again with a higher max_loop_iterations)."""
-
-    return f"""Research convergence review (iteration {iteration} of at most {max_loop_iterations}).
-
-Research area / question: {topic}
-{constraints_block}
-Report to review: {report_path}
-
-Steps:
-1. read_file the report at {report_path}.
-2. Judge whether this direction has CONVERGED to something ready for real experiments. It has
-   converged only if ALL of the following hold:
-   - The Synthesizer's verdict in the report is an explicit GO (not NO-GO, not conditional, and not
-     merely "ranked #1" without a concrete plan)
-   - Every parameter needed to start an experiment is concrete - no "TBD", "some X", or open ranges
-     left for hyperparameters, datasets, loss functions, or evaluation protocol
-   - Skeptic/Realist objections recorded in the report were either resolved or explicitly accepted
-     as a named limitation, not left dangling
-   - There is at least one concrete falsification test defined
-3. If converged: finish with respond_to_user stating verdict=APPROVED, a one-paragraph justification,
-   and the final report_path. This ends the pipeline - do not create further tasks.
-4. {not_converged_block}
-"""
-
-
-def _handle_create_research_pipeline(args: dict, runtime: dict) -> str:
-    topic = str(args.get("topic") or "").strip()
-    if not topic:
-        return json_result(success=False, error="topic is required")
-    constraints = str(args.get("constraints") or "").strip()
-    participants = args.get("participants") or RESEARCH_DEFAULT_PARTICIPANTS
-    board_name = str(args.get("board") or _new_board_name("research", topic))
-    selected_idea = str(args.get("selected_idea") or "").strip()
-    deepen_from_report = str(args.get("deepen_from_report") or "").strip()
-    iteration = int(args.get("iteration") or (2 if selected_idea and deepen_from_report else 1))
-    max_loop_iterations = int(args.get("max_loop_iterations") or 5)
-
-    if bool(selected_idea) != bool(deepen_from_report):
-        return json_result(success=False, error="selected_idea and deepen_from_report must be provided together")
-
-    slug = _slug(topic)
-    report_path = f"reports/research/{slug}.md" if iteration <= 1 else f"reports/research/{slug}-iter{iteration}.md"
-
-    data = _load_board(board_name)
-
-    meeting_task = _create_task(
-        data,
-        title=f"Research {'deepening' if selected_idea else 'ideation'} meeting (iter {iteration}): {topic[:40]}",
-        prompt=_research_meeting_prompt(
-            topic, constraints, participants, report_path,
-            selected_idea=selected_idea, deepen_from_report=deepen_from_report, iteration=iteration,
-        ),
-        skill="meeting_moderator",
-        parents=[],
-        status="ready",
-        max_iterations=args.get("max_iterations") or 40,
-        auto_compact=args.get("auto_compact"),
-        extra_tools=["meeting"],
-        metadata={
-            "kind": "research_ideation_meeting",
-            "topic": topic,
-            "report_path": report_path,
-            "iteration": iteration,
-            "selected_idea": selected_idea or None,
-            "deepen_from_report": deepen_from_report or None,
-        },
-    )
-
-    review_task = _create_task(
-        data,
-        title=f"Convergence review (iter {iteration}): {topic[:40]}",
-        prompt=_review_prompt(topic, report_path, iteration, max_loop_iterations, constraints, board_name),
-        parents=[meeting_task["id"]],
-        status="ready",
-        max_iterations=args.get("review_max_iterations") or 16,
-        auto_compact=args.get("auto_compact"),
-        metadata={
-            "kind": "research_convergence_review",
-            "topic": topic,
-            "report_path": report_path,
-            "iteration": iteration,
-            "max_loop_iterations": max_loop_iterations,
-        },
-    )
-
-    _save_board(data, board_name)
-    return json_result(
-        success=True,
-        board=board_name,
-        report_path=report_path,
-        iteration=iteration,
-        max_loop_iterations=max_loop_iterations,
-        tasks=[meeting_task, review_task],
-        board_path=str(_board_path(board_name)),
-        hint=(
-            "Call kanban_dispatch to start the meeting worker. The review task is blocked until the "
-            "meeting task is done; it will be spawned automatically once its parent completes. The "
-            "review task itself decides whether to approve (verdict=APPROVED, loop stops) or spawn the "
-            "next iteration (verdict=NEEDS-ITERATION, this tool is called again automatically) - no "
-            "manual intervention needed unless it reports verdict=BUDGET-EXHAUSTED. Subscribe with "
-            "kanban_notify_subscribe, then respond_to_user."
-        ),
-    )
-
-
-registry.register("kanban_create_research_pipeline", {
-    "description": (
-        "Create a research-idea-ideation pipeline: a structured meeting (Framer / Scout / Generator / "
-        "Skeptic / Realist / Synthesizer, with mandatory per-idea adversarial review) followed by a "
-        "convergence review that judges whether the result is ready for real experiments. If not "
-        "converged, the review task automatically spawns the next deepening iteration itself (calling "
-        "this tool again) and the loop repeats until the review approves or max_loop_iterations is hit - "
-        "no manual re-invocation needed. Use this instead of kanban_create_meeting_task whenever the "
-        "goal is finding or vetting research directions rather than a general-purpose discussion."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "board": {"type": "string", "description": "Optional board name; auto-generated from topic if omitted."},
-            "topic": {"type": "string", "description": "The research area or question to explore."},
-            "constraints": {"type": "string", "description": "Optional constraints: compute budget, dataset, timeline, etc."},
-            "selected_idea": {
-                "type": "string",
-                "description": (
-                    "Set together with deepen_from_report to run a DEEPENING iteration instead of a fresh "
-                    "brainstorm: the one direction (from a prior report) to go deeper on. Normally set "
-                    "automatically by the convergence review task, not by a human."
-                ),
-            },
-            "deepen_from_report": {
-                "type": "string",
-                "description": "Path to the prior report.md this iteration deepens (the report_path returned by a previous call). Required together with selected_idea.",
-            },
-            "iteration": {
-                "type": "integer",
-                "description": "Optional explicit iteration number for the report filename. Defaults to 1 for a fresh pipeline, or 2 when selected_idea/deepen_from_report are set.",
-            },
-            "max_loop_iterations": {
-                "type": "integer",
-                "default": 5,
-                "description": (
-                    "Hard cap on how many deepening iterations the convergence-review loop may spawn on "
-                    "its own before it must stop and report BUDGET-EXHAUSTED instead of approving or "
-                    "iterating further."
-                ),
-            },
-            "participants": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "Optional override of the default 6-role roster (Framer/Scout/Generator/Skeptic/"
-                    "Realist/Synthesizer), e.g. ['Framer: ...', 'Scout: ...']. Keep the same six "
-                    "functional roles unless you have a specific reason to change them."
-                ),
-            },
-            "max_iterations": {"type": "integer", "default": 25},
-            "review_max_iterations": {"type": "integer", "default": 16},
-            "auto_compact": {"type": "boolean", "default": True},
-        },
-        "required": ["topic"],
-    },
-}, _handle_create_research_pipeline)
-
-
 registry.register("kanban_create_task", {
     "description": "Create a persistent Kanban task for a future subagent. Use parents to enforce order; use skill to tell the worker which skill_view to load.",
     "parameters": {
@@ -1427,8 +1017,6 @@ def fire_notifications(board_name: str, data: dict[str, Any]) -> None:
         }
         for t in sorted(all_tasks, key=lambda t: t.get("created_at", ""))
     ]
-    has_meeting_task = any(str(t.get("skill") or "") == "meeting_moderator" for t in all_tasks)
-
     for sub_file in sorted(NOTIFY_DIR.glob(f"{board_name}_sub_*.json")):
         try:
             sub = json.loads(sub_file.read_text(encoding="utf-8"))
@@ -1457,7 +1045,6 @@ def fire_notifications(board_name: str, data: dict[str, Any]) -> None:
                 "board":             board_name,
                 "pending_file":      str(pending_path),
                 "on_complete_prompt": sub.get("on_complete_prompt") or "",
-                "has_meeting_task":  has_meeting_task,
                 "fired_at":          _now(),
             }
             (NOTIFY_DIR / f"wake_{session_id}_{sub['sub_id']}.json").write_text(
@@ -1493,13 +1080,6 @@ def consume_pending_notifications() -> list[dict[str, Any]]:
         tasks    = event.get("tasks", [])
         extra    = event.get("on_complete_prompt", "")
         unfinished = [t for t in tasks if t.get("status") in ("error", "blocked", "cancelled")]
-        # Only apply the generic meeting follow-up guidance to meetings that actually
-        # produced a conclusion - a meeting task that is itself unfinished has no result to
-        # treat as planning input, and telling the agent otherwise would be misleading.
-        has_meeting_task = any(
-            str(t.get("skill") or "") == "meeting_moderator" and t.get("status") not in ("error", "blocked", "cancelled")
-            for t in tasks
-        )
         task_lines = "\n".join(
             f"  [{t['status']}] {t['title']}: {t['final']}" for t in tasks
         )
@@ -1519,14 +1099,6 @@ def consume_pending_notifications() -> list[dict[str, Any]]:
                 "partial or missing, not a finished deliverable. Do not treat this board as done. "
                 "Either replan (adjust scope/approach and create new tasks) or call kanban_retry_task "
                 "(mode=resume) on the affected task_id if the same approach is still worth retrying."
-            )
-        if has_meeting_task:
-            content += (
-                "\n\nMeeting follow-up rule:\n"
-                "- Treat the meeting result as planning input for the next phase.\n"
-                "- Review the conclusion, then create downstream Kanban tasks or a Kanban pipeline for substantial deliverables.\n"
-                "- Do not perform the downstream worker work inline in this resumed turn unless the user explicitly asked for direct execution.\n"
-                "- After dispatching follow-up Kanban work, subscribe to completion notifications and respond_to_user."
             )
         messages.append({"role": "user", "content": content})
         pending_file.unlink(missing_ok=True)

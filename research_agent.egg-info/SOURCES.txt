@@ -9,8 +9,10 @@ research_agent/env.py
 research_agent/guardian.py
 research_agent/kanban_watcher.py
 research_agent/llm.py
+research_agent/md_entries.py
 research_agent/paths.py
 research_agent/prompts.py
+research_agent/roles.py
 research_agent/safety.py
 research_agent/self_review.py
 research_agent/session.py
@@ -38,6 +40,7 @@ research_agent/tools/memory.py
 research_agent/tools/registry.py
 research_agent/tools/respond.py
 research_agent/tools/restart.py
+research_agent/tools/roles.py
 research_agent/tools/self_code.py
 research_agent/tools/skills.py
 research_agent/tools/subprocess_tools.py

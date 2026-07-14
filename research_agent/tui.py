@@ -1,5 +1,5 @@
 """
-LiveDashboard — parallel agent status panel with kanban and meeting views.
+LiveDashboard — parallel agent status panel with a kanban view.
 
 Layout (bottom of terminal, scrolls up as agents print):
   ── Kanban: board-name ──────────────────────────────────────────
@@ -7,12 +7,8 @@ Layout (bottom of terminal, scrolls up as agents print):
   ⟳ task-b title                              running  45.2s
   · task-c title                                   ready
 
-  ── Meeting: mtg_xxx ── Round 2 ─────────────────────────────────
-  ✓ Alice (Architect)   responded
-  ⟳ Bob (Security)      thinking...           12.3s
-
   ── Agents ──────────────────────────────────────────────────────
-  [agent]  #3  meeting_chain    ⏱  2.1s
+  [agent]  #3  respond_to_user  ⏱  2.1s
 """
 from __future__ import annotations
 
@@ -59,7 +55,7 @@ class _Slot:
         self.done         = False
 
 
-# ── Kanban / Meeting scanning ────────────────────────────────────────────
+# ── Kanban scanning ───────────────────────────────────────────────────────
 
 _KANBAN_TERMINAL = {"done", "error", "cancelled", "blocked"}
 _TASK_ICON = {
@@ -113,38 +109,10 @@ def _task_elapsed(task: dict[str, Any], workers_dir: Path) -> float | None:
     return None
 
 
-def _scan_meetings(sessions_dir: Path) -> list[dict[str, Any]]:
-    """Return active (unclosed) meetings."""
-    meetings_dir = sessions_dir / "meetings"
-    meetings: list[dict[str, Any]] = []
-    if not meetings_dir.exists():
-        return meetings
-    for f in sorted(meetings_dir.glob("mtg_*.json")):
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            if data.get("closed_at"):
-                continue
-            meetings.append(data)
-        except Exception:
-            pass
-    return meetings
-
-
-def _meeting_participant_status(data: dict[str, Any]) -> dict[str, str]:
-    """Return {name: last_action} for each participant based on transcript."""
-    transcript: list[dict] = data.get("transcript", [])
-    last_seen: dict[str, str] = {}
-    for entry in transcript:
-        speaker = entry.get("speaker", "")
-        if speaker and speaker != "moderator":
-            last_seen[speaker] = "responded"
-    return last_seen
-
-
 # ── LiveDashboard ────────────────────────────────────────────────────────
 
 class LiveDashboard:
-    """Thread-safe live status panel: kanban boards + meetings + agent slots."""
+    """Thread-safe live status panel: kanban boards + agent slots."""
 
     _instance: "LiveDashboard | None" = None
     _init_lock = threading.Lock()
@@ -169,7 +137,6 @@ class LiveDashboard:
         self._last_scan    = 0.0
         self._scan_interval = 2.0          # seconds between file-system scans
         self._kanban_cache: list[dict] = []
-        self._meeting_cache: list[dict] = []
 
         if self._enabled:
             t = threading.Thread(target=self._run, daemon=True)
@@ -282,31 +249,6 @@ class LiveDashboard:
                 gap   = max(2, W - _vlen(left) - _vlen(right) - 2)
                 lines.append(left + " " * gap + right)
 
-        # ── Meeting panels ────────────────────────────────────────────────
-        for meeting in self._meeting_cache:
-            mid      = meeting.get("name") or meeting.get("meeting_id", "")[:12]
-            agenda   = (meeting.get("agenda") or "")[:40]
-            transcript: list[dict] = meeting.get("transcript", [])
-            round_num = sum(1 for e in transcript if e.get("speaker") == "moderator" and "[Round" in (e.get("content") or ""))
-            round_tag = f" Round {round_num}" if round_num else ""
-
-            hdr = f"{_GR}  ── Meeting: {_B}{mid}{_R}{_GR}{_MG}{round_tag}{_GR} {'─' * max(0, W - 16 - len(mid) - len(round_tag))}{_R}"
-            lines.append(hdr)
-            if agenda:
-                lines.append(f"  {_GR}Topic: {agenda}{_R}")
-
-            participant_status = _meeting_participant_status(meeting)
-            participants = meeting.get("participants", {})
-            for name, p in participants.items():
-                role    = p.get("role") or ""
-                label   = f"{name}" + (f" ({role})" if role else "")
-                spoken  = name in participant_status
-                icon    = f"{_GN}✓{_R}" if spoken else f"{_GR}·{_R}"
-                status  = f"{_GN}responded{_R}" if spoken else f"{_GR}waiting{_R}"
-                left    = f"  {icon} {_GR}{label[:30]}{_R}"
-                gap     = max(2, W - _vlen(left) - _vlen(status) - 2)
-                lines.append(left + " " * gap + status)
-
         # ── Agent strip ───────────────────────────────────────────────────
         active_slots = [self._slots[l] for l in self._order if not self._slots[l].done]
         if active_slots:
@@ -341,8 +283,7 @@ class LiveDashboard:
         self._last_scan = now
         sd = self._get_sessions_dir()
         if sd:
-            self._kanban_cache  = _scan_kanban(sd)
-            self._meeting_cache = _scan_meetings(sd)
+            self._kanban_cache = _scan_kanban(sd)
 
     def _run(self) -> None:
         while not self._stop.wait(0.25):
