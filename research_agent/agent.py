@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .context import compact_messages, rough_tokens
 from .llm import LLMClient
-from .paths import SESSIONS_DIR, ensure_project_dirs, set_workspace_root
+from .paths import SESSIONS_DIR, ensure_project_dirs, set_session_roots, set_shared_roots, set_workspace_root
 from .prompts import build_system_prompt
 from .self_review import trigger_self_review
 from .state import new_session_id, save_session
@@ -199,6 +199,7 @@ class GeneralAgent:
         *,
         model: str | None = None,
         provider: str | None = None,
+        reasoning_effort: str | None = None,
         max_iterations: int = 24,
         context_threshold_tokens: int = 90000,
         auto_compact: bool = True,
@@ -217,13 +218,18 @@ class GeneralAgent:
         agent_role: str | None = None,
         cancel_check: Callable[[], bool] | None = None,
         workspace_root: str | Path | None = None,
+        shared_roots: list[str | Path] | None = None,
         extra_runtime: dict[str, Any] | None = None,
     ) -> None:
         if workspace_root is not None:
             set_workspace_root(workspace_root)
+        # Always set (even to clear it), unlike workspace_root above: ThreadPoolExecutor
+        # reuses threads across turns/meetings, and a stale shared_roots override left
+        # over from a previous construction on this thread must not leak forward.
+        set_shared_roots(shared_roots)
         ensure_project_dirs()
         load_builtin_tools()
-        self.llm = LLMClient(model=model, provider=provider)
+        self.llm = LLMClient(model=model, provider=provider, reasoning_effort=reasoning_effort)
         self.max_iterations = max_iterations
         self.context_threshold_tokens = context_threshold_tokens
         self.auto_compact = auto_compact
@@ -239,6 +245,9 @@ class GeneralAgent:
         self.task_id = f"task_{uuid.uuid4().hex[:8]}"
         self._spill_dir = SESSIONS_DIR / ".tool_cache" / self.session_id
         self._spill_counter = 0
+        # Own tool-result spill cache is always safe to read back, regardless of
+        # workspace_root/shared_roots -- see set_session_roots docstring.
+        set_session_roots([self._spill_dir])
         self._last_compact_iter = 0
         self._live_cache_path = Path(live_cache_path) if live_cache_path else None
         self._live_cache_metadata = live_cache_metadata or {}

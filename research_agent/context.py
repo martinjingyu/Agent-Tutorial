@@ -75,7 +75,7 @@ def compact_messages(
     registry,
     *,
     focus: str | None = None,
-    protect_first: int = 2,
+    protect_first: int = 0,
     protect_last: int = 12,
 ) -> list[dict[str, Any]]:
     """Replace the middle of `messages` with an LLM-generated continuation checkpoint.
@@ -85,6 +85,14 @@ def compact_messages(
     provider already has cached from the live session instead of paying full price
     for a hand-built one-off prompt. `head` and `tail` are kept verbatim in the
     result; only the middle is meant to be distilled into the checkpoint.
+
+    protect_first defaults to 0: messages[0] is often the entire original task/turn
+    prompt (e.g. an embedding project's large per-turn instruction block), and if it
+    stays pinned forever it can dominate every subsequent call's token cost with no
+    way to shrink it. Leaving it unprotected lets the checkpoint absorb it like
+    everything else. Callers that specifically need the original instructions kept
+    verbatim across compactions (rather than paraphrased into the checkpoint) should
+    pass protect_first explicitly.
     """
     if len(messages) <= protect_first + protect_last + 1:
         return messages

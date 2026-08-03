@@ -85,6 +85,25 @@ def _read_codex_access_token() -> str:
     raise RuntimeError("No Codex access token found. Run `codex login` first.")
 
 
+_REASONING_EFFORTS = {"minimal", "low", "medium", "high"}
+
+
+def _reasoning_effort_for_model(provider: str, model: str) -> str | None:
+    """Per-model thinking effort, independent of caller-supplied overrides.
+
+    Looks up <PROVIDER>_REASONING_EFFORT_<MODEL> first (e.g. deepseek + deepseek-v4-pro ->
+    DEEPSEEK_REASONING_EFFORT_DEEPSEEK_V4_PRO, codex + gpt-5.6-sol -> CODEX_REASONING_EFFORT_GPT_5_6_SOL)
+    so different models can run at different effort levels even under the same provider,
+    then falls back to the provider-generic <PROVIDER>_REASONING_EFFORT. Returns None (no
+    override, backend default) if neither is set or the value isn't a recognized effort.
+    """
+    slug = model.strip().upper().replace("-", "_").replace(".", "_")
+    prefix = provider.strip().upper()
+    effort = get_env(f"{prefix}_REASONING_EFFORT_{slug}") or get_env(f"{prefix}_REASONING_EFFORT")
+    effort = effort.strip().lower()
+    return effort if effort in _REASONING_EFFORTS else None
+
+
 def _codex_headers(token: str) -> dict[str, str]:
     headers: dict[str, str] = {
         "User-Agent": "codex_cli_rs/0.0.0",
@@ -187,13 +206,19 @@ _DEEPSEEK_LEGACY_ALIASES = {"deepseek-chat", "deepseek-v3", "deepseek-v3-0324"}
 
 
 class LLMClient:
-    def __init__(self, model: str | None = None, provider: str | None = None):
+    def __init__(
+        self,
+        model: str | None = None,
+        provider: str | None = None,
+        reasoning_effort: str | None = None,
+    ):
         self.provider = _provider(provider)
         raw = model or _default_model(self.provider)
         # Upgrade legacy deepseek aliases → v4-flash
         if self.provider == "deepseek" and raw in _DEEPSEEK_LEGACY_ALIASES:
             raw = "deepseek-v4-flash"
         self.model = raw
+        self.reasoning_effort = reasoning_effort or _reasoning_effort_for_model(self.provider, raw)
         self._codex_token: str | None = None
         self._client: OpenAI | None = None
 
@@ -235,7 +260,13 @@ class LLMClient:
         status = getattr(exc, "status_code", None) or getattr(
             getattr(exc, "response", None), "status_code", None
         )
-        return status in (429, 500, 502, 503, 504)
+        if status == 429:
+            return True
+        # Any 5xx, not just the standard handful -- Cloudflare-fronted backends (e.g.
+        # chatgpt.com/backend-api/codex) also return their own extended codes like 520
+        # ("unknown error")/521/522/524/etc. for transient origin/proxy hiccups, and
+        # those are just as safe to retry as a plain 502/503.
+        return isinstance(status, int) and 500 <= status < 600
 
     _MAX_RETRIES = 5
 
@@ -278,11 +309,22 @@ class LLMClient:
             "tool_choice": "auto" if tools else None,
         }
         if self.provider == "deepseek":
-            extra_body = _deepseek_extra_body()
+            extra_body = self._deepseek_reasoning_kwargs()
             if extra_body:
                 kwargs["extra_body"] = extra_body
+            if self.reasoning_effort:
+                kwargs["reasoning_effort"] = self.reasoning_effort
 
         return self._with_retry(lambda: self._client_or_create().chat.completions.create(**kwargs))
+
+    def _deepseek_reasoning_kwargs(self) -> dict[str, Any] | None:
+        extra_body = _deepseek_extra_body()
+        # A caller-supplied reasoning_effort always implies thinking must be on --
+        # DEEPSEEK_THINKING=disabled (the default) would otherwise silently discard
+        # the effort level the caller explicitly asked for.
+        if self.reasoning_effort:
+            extra_body = {**(extra_body or {}), "thinking": {"type": "enabled"}}
+        return extra_body
 
     def complete_text(self, prompt: str) -> str:
         if self.provider == "codex":
@@ -294,9 +336,11 @@ class LLMClient:
             "messages": [{"role": "user", "content": prompt}],
         }
         if self.provider == "deepseek":
-            extra_body = _deepseek_extra_body()
+            extra_body = self._deepseek_reasoning_kwargs()
             if extra_body:
                 kwargs["extra_body"] = extra_body
+            if self.reasoning_effort:
+                kwargs["reasoning_effort"] = self.reasoning_effort
 
         response = self._with_retry(lambda: self._client_or_create().chat.completions.create(**kwargs))
         return response.choices[0].message.content or ""
@@ -340,9 +384,11 @@ class LLMClient:
     def _codex_complete(self, prompt: str, *, model: str) -> str:
         def run_once() -> str:
             text_parts: list[str] = []
+            effort = _reasoning_effort_for_model(self.provider, model)
             with self._client_or_create().responses.stream(
                 model=model,
                 input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}]}],
+                **({"reasoning": {"effort": effort}} if effort else {}),
                 **self._codex_session_kwargs(),
             ) as stream:
                 for event in stream:
@@ -359,6 +405,7 @@ class LLMClient:
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "input": input_items,
+                **({"reasoning": {"effort": self.reasoning_effort}} if self.reasoning_effort else {}),
                 **self._codex_session_kwargs(),
             }
             if instructions:

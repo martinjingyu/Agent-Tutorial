@@ -5,7 +5,7 @@ import json
 import time
 from pathlib import Path
 
-from ..safety import resolve_workspace_path
+from ..safety import resolve_readable_path, resolve_workspace_path
 from .registry import json_result, registry
 
 
@@ -17,10 +17,10 @@ _SEARCH_REPEAT_STATE: dict[str, tuple[tuple[object, ...], int]] = {}
 def _resolve_readable_path(raw_path: str | None) -> Path:
     if not raw_path:
         raise ValueError("path is required")
-    try:
-        return resolve_workspace_path(raw_path)
-    except ValueError:
-        return Path(raw_path).expanduser().resolve()
+    # Read-only tools are unrestricted (see resolve_readable_path's docstring) --
+    # kept as a separate wrapper only because read_file/read_pdf/search_files treat
+    # a missing path as required up front, unlike write_file's default-to-base callers.
+    return resolve_readable_path(raw_path)
 
 
 def _extract_docx_text(path: Path) -> str:
@@ -133,7 +133,7 @@ def _append_file(args: dict, runtime: dict) -> str:
 
 
 def _list_files(args: dict, runtime: dict) -> str:
-    root = resolve_workspace_path(args.get("path") or ".")
+    root = resolve_readable_path(args.get("path") or ".")
     max_results = int(args.get("max_results") or 200)
     if root.is_file():
         return json_result(success=True, files=[str(root)])
@@ -141,7 +141,7 @@ def _list_files(args: dict, runtime: dict) -> str:
     for item in root.rglob("*"):
         if ".git" in item.parts or "__pycache__" in item.parts:
             continue
-        files.append(str(item.relative_to(resolve_workspace_path("."))))
+        files.append(str(item.relative_to(root)))
         if len(files) >= max_results:
             break
     return json_result(success=True, root=str(root), files=files, truncated=len(files) >= max_results)

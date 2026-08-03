@@ -44,6 +44,47 @@ def workspace_root() -> Path:
     return Path(PROJECT_ROOT / "workspace").expanduser().resolve()
 
 
+# Thread-local, same reasoning as _workspace_local above: extra directories a file
+# tool call may access besides workspace_root(), for embedding projects (e.g.
+# Agent-Meeting) that want a small, explicit, opt-in area participants can use to
+# intentionally share files with each other -- without falling back to letting a
+# model read *any* path it can guess (that was the whole problem: participants
+# reading each other's private workspaces or stale files from old runs).
+_shared_roots_local = threading.local()
+
+
+def set_shared_roots(paths: list[str | Path] | None) -> None:
+    """Programmatic override for shared_roots(). Pass None (or an empty list) to
+    clear it -- always call this explicitly on every GeneralAgent construction
+    (not only when sharing is wanted), since ThreadPoolExecutor reuses threads and
+    a stale override from a previous turn/meeting would otherwise leak forward."""
+    _shared_roots_local.override = [Path(p).expanduser().resolve() for p in paths] if paths else []
+
+
+def shared_roots() -> list[Path]:
+    return getattr(_shared_roots_local, "override", None) or []
+
+
+# Thread-local, same reasoning as _shared_roots_local: the current agent's own tool-result
+# spill cache (agent.py's self._spill_dir, under SESSIONS_DIR/.tool_cache/<session_id>) lives
+# outside workspace_root/shared_roots since SESSIONS_DIR is this package's own directory, not
+# the embedding project's. It's the agent's own prior tool output, not another participant's
+# data, so it's safe to always allow -- unlike shared_roots this isn't participant-facing/opt-in,
+# it's set automatically per GeneralAgent construction (see agent.py.__init__).
+_session_roots_local = threading.local()
+
+
+def set_session_roots(paths: list[str | Path] | None) -> None:
+    """Programmatic override for session_roots(). Always call this on every GeneralAgent
+    construction (not only when there's a spill dir), since ThreadPoolExecutor reuses threads
+    and a stale override from a previous turn/meeting would otherwise leak forward."""
+    _session_roots_local.override = [Path(p).expanduser().resolve() for p in paths] if paths else []
+
+
+def session_roots() -> list[Path]:
+    return getattr(_session_roots_local, "override", None) or []
+
+
 _roles_root_override: Path | None = None
 
 
