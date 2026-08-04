@@ -121,6 +121,63 @@ def _codex_headers(token: str) -> dict[str, str]:
     return headers
 
 
+def _flatten_text_content(content: Any) -> str:
+    """Best-effort plain-text rendering of chat-completions-style content, for spots
+    (system instructions) where the Responses API only accepts a string -- any image
+    parts are dropped rather than stringified into garbage."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = [
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") in ("text", "input_text")
+        ]
+        if texts:
+            return "\n".join(texts)
+    return str(content)
+
+
+def _to_responses_content_parts(content: Any) -> list[dict[str, Any]]:
+    """Converts chat-completions-style content (a plain string, or a list of
+    {"type": "text", "text": ...} / {"type": "image_url", "image_url": {"url": ...}}
+    parts -- the format every other call site in this codebase already builds
+    messages in) into Responses API input parts (input_text / input_image).
+
+    Previously this always stringified non-str content with str(content), which for
+    a multimodal list silently turned an image part into an unusable Python repr
+    instead of an image the model could actually see."""
+    if isinstance(content, str):
+        return [{"type": "input_text", "text": content}]
+    if not isinstance(content, list):
+        return [{"type": "input_text", "text": str(content)}]
+
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            parts.append({"type": "input_text", "text": str(part)})
+            continue
+        part_type = part.get("type")
+        if part_type in ("text", "input_text"):
+            parts.append({"type": "input_text", "text": part.get("text", "")})
+            continue
+        if part_type in ("image_url", "input_image"):
+            image_url = part.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else (image_url or part.get("url"))
+            if not url:
+                continue
+            image_part: dict[str, Any] = {"type": "input_image", "image_url": url}
+            detail = image_url.get("detail") if isinstance(image_url, dict) else part.get("detail")
+            if detail:
+                image_part["detail"] = detail
+            parts.append(image_part)
+            continue
+        # Unknown part shape -- render it as readable text rather than silently
+        # dropping it, same fallback spirit as the old str(content) behavior.
+        parts.append({"type": "input_text", "text": json.dumps(part, ensure_ascii=False)})
+    return parts or [{"type": "input_text", "text": ""}]
+
+
 def _to_responses_input(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     instructions = ""
     items: list[dict[str, Any]] = []
@@ -130,11 +187,10 @@ def _to_responses_input(messages: list[dict[str, Any]]) -> tuple[str, list[dict[
         content = msg.get("content") or ""
 
         if role == "system":
-            instructions = content if isinstance(content, str) else str(content)
+            instructions = _flatten_text_content(content)
             continue
         if role == "user":
-            text = content if isinstance(content, str) else str(content)
-            items.append({"role": "user", "content": [{"type": "input_text", "text": text}]})
+            items.append({"role": "user", "content": _to_responses_content_parts(content)})
             continue
         if role == "assistant":
             if content:
