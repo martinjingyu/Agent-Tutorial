@@ -384,7 +384,13 @@ class LLMClient:
     def _codex_complete(self, prompt: str, *, model: str) -> str:
         def run_once() -> str:
             text_parts: list[str] = []
-            effort = _reasoning_effort_for_model(self.provider, model)
+            # A caller-supplied reasoning_effort (e.g. judge.py's LLMClient(...,
+            # reasoning_effort="medium")) must win over the env-var lookup, mirroring
+            # _codex_chat's behavior below -- otherwise an explicit constructor value
+            # is silently discarded whenever the CODEX_REASONING_EFFORT* env vars
+            # aren't set (the common case), and the call runs at whatever the backend's
+            # own default happens to be instead of what the caller asked for.
+            effort = self.reasoning_effort or _reasoning_effort_for_model(self.provider, model)
             with self._client_or_create().responses.stream(
                 model=model,
                 input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}]}],
