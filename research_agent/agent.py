@@ -133,6 +133,7 @@ FINISH_BLOCKED_TOOLS = {
     "browser_scroll",
     "browser_screenshot",
     "browser_back",
+    "view_image",
 }
 FINISH_REMINDER = (
     "Maximum iteration budget reached. Do not continue searching or browsing. "
@@ -705,6 +706,8 @@ class GeneralAgent:
                     elif tc.function.name == NOTES_TOOL_NAME:
                         self._replace_previous_result_with_notes(messages, args.get("notes", ""))
                         self._compress_old_read_files(messages)
+                    if self._runtime.get("_pending_images"):
+                        self._inject_pending_images(messages, self._runtime)
                     if interrupted:
                         for skipped in tool_calls[index + 1 :]:
                             skipped_result = json.dumps(
@@ -906,6 +909,14 @@ class GeneralAgent:
             f"--- preview ({SPILL_PREVIEW_CHARS} chars) ---\n"
             f"{preview}\n[...]"
         )
+
+    def _inject_pending_images(self, messages: list[dict[str, Any]], runtime: dict[str, Any]) -> None:
+        """Delivers whatever view_image() calls staged this iteration as a synthetic
+        user message right after their (text-only) tool results, so the images are
+        part of the model's input on the very next call -- see tools/vision.py."""
+        pending = runtime.pop("_pending_images", None)
+        if pending:
+            messages.append({"role": "user", "content": pending})
 
     def _compress_previous_snapshot(self, messages: list[dict[str, Any]]) -> None:
         found = 0
