@@ -42,6 +42,37 @@ COMPACT_AFTER_FINAL_TOOL_COUNT = 8
 the agent will compact before executing the next batch of tool calls."""
 
 
+def _user_message_text(user_message: Any, limit: int | None = None) -> str:
+    """Text-only rendering of a run() user_message, which may be a plain string or a
+    chat-completions-style multimodal list ([{"type": "text", ...}, {"type":
+    "image_url", ...}]) -- for previews/logging/fallbacks that need a string and
+    should not choke on or garble the image parts."""
+    if isinstance(user_message, str):
+        text = user_message
+    elif isinstance(user_message, list):
+        texts = [
+            part.get("text", "")
+            for part in user_message
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        has_images = any(
+            isinstance(part, dict) and part.get("type") == "image_url" for part in user_message
+        )
+        text = "\n".join(texts) + (" [+images]" if has_images else "")
+    else:
+        text = str(user_message)
+    return text[:limit] if limit is not None else text
+
+
+def _prepend_text_to_user_message(user_message: Any, text: str) -> Any:
+    """Prepends `text` ahead of a run() user_message, preserving it whether it's a
+    plain string or a multimodal content list (image parts must never be routed
+    through string formatting/concatenation, which would silently mangle them)."""
+    if isinstance(user_message, list):
+        return [{"type": "text", "text": text}] + user_message
+    return f"{text}\n\n---\n{user_message}" if user_message.strip() else text
+
+
 def _display_model_name(model: str, provider: str) -> str:
     """Distinguish Codex-quota calls (free) from token-billed API calls with the
     same underlying model name, e.g. "gpt-5.5" via codex -> "codex-5.5"."""
@@ -309,7 +340,7 @@ class GeneralAgent:
     def _pre_loop_compact_review(
         self,
         messages: list[dict[str, Any]],
-        user_message: str,
+        user_message: str | list[dict[str, Any]],
         system_prompt: str,
     ) -> list[dict[str, Any]] | None:
         """Review conversation history before the agent loop starts.
@@ -352,7 +383,7 @@ class GeneralAgent:
         {json.dumps(messages[-4:], ensure_ascii=False, default=str)[:4000]}
 
         ## New user message
-        {user_message[:2000]}
+        {_user_message_text(user_message, 2000)}
 
         ## Your response
         Answer with a JSON object only, no other text:
@@ -368,7 +399,7 @@ class GeneralAgent:
                     json_str = json_str[:json_str.rindex("}") + 1]
                     decision = json.loads(json_str)
                     if decision.get("should_compact"):
-                        focus = decision.get("focus", user_message)
+                        focus = decision.get("focus") or _user_message_text(user_message, 200)
                         self.ui.compact(
                             f"pre-loop: {decision.get('reason', 'new independent task')}"
                         )
@@ -450,16 +481,24 @@ class GeneralAgent:
 
     def run(
         self,
-        user_message: str,
+        user_message: str | list[dict[str, Any]],
         history: list[dict[str, Any]] | None = None,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
+        # user_message is normally a plain string, but callers may instead pass a
+        # chat-completions-style multimodal content list ([{"type": "text", ...},
+        # {"type": "image_url", ...}]) when the turn needs to show the model an
+        # image -- e.g. Agent-Meeting's visual-reviewer participant. Every place
+        # below that touches user_message as a string goes through
+        # _user_message_text()/_prepend_text_to_user_message() so it degrades to a
+        # text-only view instead of crashing or mangling the image parts.
+
         # Consume any pending kanban notifications and prepend to current message
         # so the agent wakes up aware of board completion without a second user turn.
         pending = _consume_notifications()
         if pending:
             notif_text = "\n\n".join(m["content"] for m in pending)
-            user_message = f"{notif_text}\n\n---\n{user_message}" if user_message.strip() else notif_text
+            user_message = _prepend_text_to_user_message(user_message, notif_text)
 
         messages = self._repair_tool_sequences(list(history or []))
         self._system_prompt_override = system_prompt
@@ -948,7 +987,7 @@ class GeneralAgent:
             f"{value}"
         )
 
-    def _fallback_final_response(self, messages: list[dict[str, Any]], user_message: str) -> str:
+    def _fallback_final_response(self, messages: list[dict[str, Any]], user_message: str | list[dict[str, Any]]) -> str:
         messages.append({"role": "user", "content": FINISH_REMINDER})
         return self._run_to_finish(messages)
 
