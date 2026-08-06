@@ -1,18 +1,21 @@
 """view_image: lets an agent actually see an image file's real pixel content.
 
 Tool results are text-only by API protocol (a function/tool call cannot itself
-carry an image back to the model) -- so this tool reads and base64-encodes the
-image, stashes it on `runtime["_pending_images"]`, and returns a plain text
-confirmation as its own tool result. The agent loop (see agent.py's
-_inject_pending_images, called right after every tool result is appended) then
+carry an image back to the model) -- so this tool reads the image, downscales/
+recompresses it for delivery (see _encode_for_delivery), stashes it on
+runtime["_pending_images"], and returns a plain text confirmation as its own tool
+result. The agent loop (see agent.py's main tool-call loop, which flushes
+_pending_images once after each full batch of tool_calls is processed) then
 appends a synthetic user message carrying the actual image content parts, so the
 image is delivered as part of the *next* model turn -- not this tool result.
 """
 from __future__ import annotations
 
 import base64
+import io
 import mimetypes
-from pathlib import Path
+
+from PIL import Image, ImageOps
 
 from ..safety import resolve_readable_path
 from .registry import json_result, registry
@@ -26,7 +29,80 @@ _IMAGE_MIME_FALLBACK = {
     ".bmp": "image/bmp",
 }
 
-_MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20MB -- comfortably under typical provider upload caps
+_MAX_IMAGE_BYTES = 20 * 1024 * 1024  # refuse to even attempt an absurdly large source file
+
+# Vision APIs tile/downsample internally past a certain resolution -- shipping more
+# pixels than this buys no real detail at typical "high" detail settings, only more
+# bytes to upload and more tokens to bill, and (since the agent loop resends the
+# whole running conversation on every subsequent call within a turn) that cost is
+# paid again on every later call in the same turn, not just once.
+_MAX_SIDE_PX = 1536
+_TARGET_ENCODED_BYTES = 900_000  # soft budget for the encoded (pre-base64) image
+_JPEG_QUALITY_STEPS = (85, 75, 65, 55, 45)
+
+
+def _encode_for_delivery(data: bytes, suffix: str) -> tuple[str, str]:
+    """Returns (mime, base64_str) for the bytes actually handed to the model --
+    orientation-corrected, downscaled to _MAX_SIDE_PX, and recompressed to fit
+    _TARGET_ENCODED_BYTES where possible."""
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        img = None
+
+    if img is None:
+        # Not decodable by Pillow (exotic/corrupted format) -- deliver the original
+        # bytes untouched rather than failing the whole call over a format we don't
+        # know how to re-encode.
+        mime = (
+            mimetypes.guess_type(f"x{suffix}")[0]
+            or _IMAGE_MIME_FALLBACK.get(suffix)
+            or "application/octet-stream"
+        )
+        return mime, base64.b64encode(data).decode("ascii")
+
+    if len(data) <= _TARGET_ENCODED_BYTES and max(img.size) <= _MAX_SIDE_PX:
+        # Already within budget -- deliver the original bytes untouched. Re-encoding
+        # a small/simple image can sometimes make it *bigger* (e.g. JPEG block
+        # overhead on a near-solid-color PNG), and this skips needlessly discarding
+        # the original encoding/metadata for images that were never the problem.
+        mime = (
+            mimetypes.guess_type(f"x{suffix}")[0]
+            or _IMAGE_MIME_FALLBACK.get(suffix)
+            or f"image/{(img.format or 'png').lower()}"
+        )
+        return mime, base64.b64encode(data).decode("ascii")
+
+    img = ImageOps.exif_transpose(img) or img
+    if max(img.size) > _MAX_SIDE_PX:
+        img.thumbnail((_MAX_SIDE_PX, _MAX_SIDE_PX), Image.LANCZOS)
+
+    # "transparency" can appear in .info for palette/1-bit/grayscale modes too, not
+    # just "P" -- e.g. a mode "1" image with a color-key transparency entry, which is
+    # exactly the shape of one of this project's own real assets (a blank/placeholder
+    # PNG whose *only* meaningful signal is that it's transparent).
+    has_alpha = img.mode in ("RGBA", "LA") or "transparency" in img.info
+    if has_alpha:
+        # Preserve transparency losslessly -- e.g. a blank/placeholder asset is only
+        # recognizable as blank because its alpha channel survives; flattening to
+        # JPEG onto an opaque background would hide exactly the thing being judged.
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        if buf.tell() <= _TARGET_ENCODED_BYTES:
+            return "image/png", base64.b64encode(buf.getvalue()).decode("ascii")
+        # Still too big even as PNG at the resolution cap -- fall through to JPEG
+        # rather than ship an oversized payload; transparency is lost here, but only
+        # for images large enough that this is a rare path.
+        img = img.convert("RGB")
+    elif img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+
+    for quality in _JPEG_QUALITY_STEPS:
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        if buf.tell() <= _TARGET_ENCODED_BYTES or quality == _JPEG_QUALITY_STEPS[-1]:
+            return "image/jpeg", base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def _view_image(args: dict, runtime: dict) -> str:
@@ -54,23 +130,25 @@ def _view_image(args: dict, runtime: dict) -> str:
 
     detail = args.get("detail") if args.get("detail") in ("low", "high", "auto") else None
     question = args.get("question")
-    b64 = base64.b64encode(data).decode("ascii")
+    delivered_mime, b64 = _encode_for_delivery(data, suffix)
 
     pending = runtime.setdefault("_pending_images", [])
     label = f"[Image: {path}]" + (f" -- focus: {question}" if question else "")
     pending.append({"type": "text", "text": label})
     pending.append({
         "type": "image_url",
-        "image_url": {"url": f"data:{mime};base64,{b64}", **({"detail": detail} if detail else {})},
+        "image_url": {"url": f"data:{delivered_mime};base64,{b64}", **({"detail": detail} if detail else {})},
     })
 
     return json_result(
         success=True,
         path=str(path),
         bytes=len(data),
+        delivered_bytes=len(b64) * 3 // 4,
         note=(
-            "Image loaded. It will be shown to you as an actual image on your next "
-            "turn, not in this tool result."
+            "Image loaded (resized/recompressed for delivery if it was large). It "
+            "will be shown to you as an actual image on your next turn, not in this "
+            "tool result."
             + (f" Focus question noted: {question}" if question else "")
         ),
     )

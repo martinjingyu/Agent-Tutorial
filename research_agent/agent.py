@@ -136,9 +136,13 @@ FINISH_BLOCKED_TOOLS = {
     "view_image",
 }
 FINISH_REMINDER = (
-    "Maximum iteration budget reached. Do not continue searching or browsing. "
-    "Finish immediately using the information already gathered. If an output file "
-    "is needed, write it now, then call respond_to_user."
+    "Out of iteration budget for this turn. Search/browsing tools are blocked now, so "
+    "stop exploring. If there's a genuinely important file still to write, write it -- "
+    "but don't rush to force-complete work you haven't actually done, and don't "
+    "fabricate a result to make it look finished. Call respond_to_user with an honest "
+    "status: what's actually done and verified, and if the task isn't finished, what's "
+    "still left. This isn't necessarily a hard stop -- if you're in an ongoing "
+    "conversation, whoever you're working for can just tell you to continue next time."
 )
 
 
@@ -706,8 +710,6 @@ class GeneralAgent:
                     elif tc.function.name == NOTES_TOOL_NAME:
                         self._replace_previous_result_with_notes(messages, args.get("notes", ""))
                         self._compress_old_read_files(messages)
-                    if self._runtime.get("_pending_images"):
-                        self._inject_pending_images(messages, self._runtime)
                     if interrupted:
                         for skipped in tool_calls[index + 1 :]:
                             skipped_result = json.dumps(
@@ -737,6 +739,18 @@ class GeneralAgent:
                             self._write_live_cache("interrupted", messages, final_text=final_text)
                             self.ui.final()
                         break
+                # Flush any images queued by view_image calls in this batch only after
+                # every tool_call in the batch has its own contiguous tool-role result
+                # appended above -- _repair_tool_sequences() expects an assistant
+                # tool_calls message to be followed immediately by all of its own tool
+                # results with nothing interleaved; injecting per-tool-call (inside the
+                # loop above) split later tool results away from their assistant
+                # message whenever the model batched more than one view_image call
+                # (parallel_tool_calls=True makes that the common case, not an edge
+                # case), so repair treated them as orphaned/missing and manufactured a
+                # false "Recovered missing tool result" error for each one.
+                if self._runtime.get("_pending_images"):
+                    self._inject_pending_images(messages, self._runtime)
                 if interrupted:
                     if final_text:
                         break
