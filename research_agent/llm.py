@@ -309,9 +309,16 @@ class LLMClient:
 
     @staticmethod
     def _is_transient(exc: Exception) -> bool:
-        """True for timeout / connection / 5xx errors that are worth retrying."""
+        """True for timeout / connection / protocol / 5xx errors that are worth
+        retrying. "ProtocolError" covers httpx.RemoteProtocolError /
+        httpcore.RemoteProtocolError ("peer closed connection without sending
+        complete message body") -- the mid-stream disconnect _codex_retry's own
+        docstring already describes, which has no status_code (it's a transport-
+        level break, not an HTTP response) so it fell through this check entirely
+        until this was added, meaning the retry loop built for exactly this case
+        never actually caught it."""
         name = type(exc).__name__
-        if any(k in name for k in ("Timeout", "Connection", "ServiceUnavailable")):
+        if any(k in name for k in ("Timeout", "Connection", "ServiceUnavailable", "ProtocolError")):
             return True
         status = getattr(exc, "status_code", None) or getattr(
             getattr(exc, "response", None), "status_code", None
