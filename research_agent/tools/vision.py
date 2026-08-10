@@ -41,10 +41,16 @@ _TARGET_ENCODED_BYTES = 900_000  # soft budget for the encoded (pre-base64) imag
 _JPEG_QUALITY_STEPS = (85, 75, 65, 55, 45)
 
 
-def _encode_for_delivery(data: bytes, suffix: str) -> tuple[str, str]:
+_API_SUPPORTED_MIMES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+
+def _encode_for_delivery(data: bytes) -> tuple[str, str] | None:
     """Returns (mime, base64_str) for the bytes actually handed to the model --
     orientation-corrected, downscaled to _MAX_SIDE_PX, and recompressed to fit
-    _TARGET_ENCODED_BYTES where possible."""
+    _TARGET_ENCODED_BYTES where possible. Returns None if the file cannot be
+    delivered as one of the vision API's supported formats at all (undecodable by
+    Pillow -- an exotic/corrupted file, or one whose extension lies about its real
+    content, e.g. this project's own "HTML saved as .png" fixtures)."""
     try:
         img = Image.open(io.BytesIO(data))
         img.load()
@@ -52,27 +58,31 @@ def _encode_for_delivery(data: bytes, suffix: str) -> tuple[str, str]:
         img = None
 
     if img is None:
-        # Not decodable by Pillow (exotic/corrupted format) -- deliver the original
-        # bytes untouched rather than failing the whole call over a format we don't
-        # know how to re-encode.
-        mime = (
-            mimetypes.guess_type(f"x{suffix}")[0]
-            or _IMAGE_MIME_FALLBACK.get(suffix)
-            or "application/octet-stream"
-        )
-        return mime, base64.b64encode(data).decode("ascii")
+        # Not decodable by Pillow at all -- there is no safe way to re-encode bytes
+        # we can't parse, and shipping them as-is (the old behavior) just traded a
+        # clear tool-level error now for a confusing API 400 one or two turns later.
+        # The caller must surface this as a failed tool call instead.
+        return None
 
-    if len(data) <= _TARGET_ENCODED_BYTES and max(img.size) <= _MAX_SIDE_PX:
-        # Already within budget -- deliver the original bytes untouched. Re-encoding
-        # a small/simple image can sometimes make it *bigger* (e.g. JPEG block
-        # overhead on a near-solid-color PNG), and this skips needlessly discarding
-        # the original encoding/metadata for images that were never the problem.
-        mime = (
-            mimetypes.guess_type(f"x{suffix}")[0]
-            or _IMAGE_MIME_FALLBACK.get(suffix)
-            or f"image/{(img.format or 'png').lower()}"
-        )
-        return mime, base64.b64encode(data).decode("ascii")
+    # Trust Pillow's own detected format over the file extension/suffix -- a
+    # mismatched extension (this project's evidence includes real examples of
+    # non-image content saved under an image extension) must not decide the MIME
+    # type sent to the API.
+    detected_mime = f"image/{img.format.lower()}" if img.format else None
+    if detected_mime == "image/jpg":
+        detected_mime = "image/jpeg"
+
+    if (
+        detected_mime in _API_SUPPORTED_MIMES
+        and len(data) <= _TARGET_ENCODED_BYTES
+        and max(img.size) <= _MAX_SIDE_PX
+    ):
+        # Already a supported format and within budget -- deliver the original
+        # bytes untouched. Re-encoding a small/simple image can sometimes make it
+        # *bigger* (e.g. JPEG block overhead on a near-solid-color PNG), and this
+        # skips needlessly discarding the original encoding/metadata for images
+        # that were never the problem.
+        return detected_mime, base64.b64encode(data).decode("ascii")
 
     img = ImageOps.exif_transpose(img) or img
     if max(img.size) > _MAX_SIDE_PX:
@@ -130,7 +140,17 @@ def _view_image(args: dict, runtime: dict) -> str:
 
     detail = args.get("detail") if args.get("detail") in ("low", "high", "auto") else None
     question = args.get("question")
-    delivered_mime, b64 = _encode_for_delivery(data, suffix)
+    encoded = _encode_for_delivery(data)
+    if encoded is None:
+        return json_result(
+            success=False,
+            error=(
+                f"{path} claims to be an image (by extension) but Pillow could not "
+                "decode it as pixel content -- treat this file as unreadable/corrupt "
+                "rather than as a real image; do not guess at its visual content."
+            ),
+        )
+    delivered_mime, b64 = encoded
 
     pending = runtime.setdefault("_pending_images", [])
     label = f"[Image: {path}]" + (f" -- focus: {question}" if question else "")
