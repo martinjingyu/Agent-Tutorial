@@ -286,24 +286,40 @@ class LLMClient:
     def _build_client(self) -> OpenAI:
         if self.provider == "codex":
             self._codex_token = _read_codex_access_token()
+            # A single float here sets connect/read/write/pool all to the same
+            # value. 120s is fine for a normal tool-calling turn, but gpt-5.6-sol
+            # at high reasoning effort on a large prompt (e.g. synthesizing a full
+            # meeting transcript in one call) can go well over two minutes before
+            # its first streamed byte -- that showed up as httpx.ReadTimeout with
+            # zero deltas ever yielded, not as a slow-but-working response.
+            # CODEX_TIMEOUT_SECONDS lets a caller raise this further for other
+            # long-reasoning workloads without editing this file.
+            codex_timeout = float(get_env("CODEX_TIMEOUT_SECONDS", "600"))
             return OpenAI(
                 api_key=self._codex_token,
                 base_url=get_env("CODEX_BASE_URL", CODEX_BASE_URL),
                 default_headers=_codex_headers(self._codex_token),
                 max_retries=0,
-                timeout=120.0,
+                timeout=codex_timeout,
             )
         if self.provider == "deepseek":
+            # Same reasoning as the codex branch above: a large prompt at high
+            # reasoning effort can go quiet past 120s before the first streamed
+            # byte, which surfaces as httpx.ReadTimeout with zero content ever
+            # received, not as a slow-but-working response.
+            deepseek_timeout = float(get_env("DEEPSEEK_TIMEOUT_SECONDS", "600"))
             return OpenAI(
                 api_key=get_env("DEEPSEEK_API_KEY"),
                 base_url=get_env("DEEPSEEK_BASE_URL", DEEPSEEK_BASE_URL),
-                timeout=120.0,
+                timeout=deepseek_timeout,
                 max_retries=0,
             )
+        # Same reasoning as the codex/deepseek branches above.
+        openai_timeout = float(get_env("OPENAI_TIMEOUT_SECONDS", "600"))
         return OpenAI(
             api_key=get_env("OPENAI_API_KEY"),
             base_url=get_env("OPENAI_BASE_URL") or None,
-            timeout=120.0,
+            timeout=openai_timeout,
             max_retries=0,
         )
 
@@ -379,6 +395,58 @@ class LLMClient:
                 kwargs["reasoning_effort"] = self.reasoning_effort
 
         return self._with_retry(lambda: self._client_or_create().chat.completions.create(**kwargs))
+
+    def chat_stream(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]):
+        """Yields text deltas as they arrive instead of blocking until the full
+        response is ready like chat() does -- useful for a long, slow call (e.g. a
+        big synthesis prompt at high reasoning effort) where a caller wants live
+        proof the connection is still alive rather than a silent multi-minute wait
+        that's indistinguishable from a hang until it either finishes or times out.
+
+        Deliberately no automatic retry here, unlike chat()/_with_retry: retrying a
+        partially-yielded stream would either duplicate text already handed to the
+        caller or require buffering everything anyway, which defeats the point of
+        streaming. A failure (including on the very first byte) propagates as an
+        exception; callers that want retry semantics should use chat() instead."""
+        if self.provider == "codex":
+            instructions, input_items = _to_responses_input(messages)
+            kwargs: dict[str, Any] = {
+                "model": self.model,
+                "input": input_items,
+                **({"reasoning": {"effort": self.reasoning_effort}} if self.reasoning_effort else {}),
+                **self._codex_session_kwargs(),
+            }
+            if instructions:
+                kwargs["instructions"] = instructions
+            if tools:
+                kwargs["tools"] = _convert_tools_for_responses(tools)
+                kwargs["tool_choice"] = "auto"
+                kwargs["parallel_tool_calls"] = True
+            with self._client_or_create().responses.stream(**kwargs) as stream:
+                for event in stream:
+                    if event.type == "response.output_text.delta" and event.delta:
+                        yield event.delta
+            return
+
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "tools": tools or None,
+            "tool_choice": "auto" if tools else None,
+            "stream": True,
+        }
+        if self.provider == "deepseek":
+            extra_body = self._deepseek_reasoning_kwargs()
+            if extra_body:
+                kwargs["extra_body"] = extra_body
+            if self.reasoning_effort:
+                kwargs["reasoning_effort"] = self.reasoning_effort
+        for chunk in self._client_or_create().chat.completions.create(**kwargs):
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
 
     def _deepseek_reasoning_kwargs(self) -> dict[str, Any] | None:
         extra_body = _deepseek_extra_body()
