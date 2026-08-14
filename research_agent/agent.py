@@ -9,7 +9,7 @@ from typing import Any, Callable
 from pathlib import Path
 
 from .context import compact_messages, rough_tokens
-from .llm import LLMClient
+from .llm import Cancelled, LLMClient
 from .paths import SESSIONS_DIR, ensure_project_dirs, set_session_roots, set_shared_roots, set_workspace_root
 from .prompts import build_system_prompt
 from .self_review import trigger_self_review
@@ -265,7 +265,9 @@ class GeneralAgent:
         set_shared_roots(shared_roots)
         ensure_project_dirs()
         load_builtin_tools()
-        self.llm = LLMClient(model=model, provider=provider, reasoning_effort=reasoning_effort)
+        self.llm = LLMClient(
+            model=model, provider=provider, reasoning_effort=reasoning_effort, cancel_check=cancel_check
+        )
         self.max_iterations = max_iterations
         self.context_threshold_tokens = context_threshold_tokens
         self.auto_compact = auto_compact
@@ -580,6 +582,16 @@ class GeneralAgent:
                     messages.append({"role": "user", "content": correction})
                     self._write_live_cache("running", messages, final_text="")
                     continue
+                final_text = "Interrupted by user. Session state was saved."
+                messages.append({"role": "assistant", "content": final_text})
+                self._write_live_cache("interrupted", messages, final_text=final_text)
+                self.ui.final()
+                break
+            except Cancelled:
+                # Same clean stop as KeyboardInterrupt, but no _interrupt_correction()
+                # prompt -- that's this class's CLI-only "type a correction instead of
+                # fully stopping" flow, meaningless for a programmatic cancel_check()
+                # (e.g. a web UI's cancel button) with no interactive terminal behind it.
                 final_text = "Interrupted by user. Session state was saved."
                 messages.append({"role": "assistant", "content": final_text})
                 self._write_live_cache("interrupted", messages, final_text=final_text)
@@ -1054,6 +1066,13 @@ class GeneralAgent:
             api_messages = [{"role": "system", "content": self._build_system_prompt()}, *messages]
             try:
                 response = self.llm.chat(api_messages, self._registry.definitions())
+            except Cancelled:
+                # Must be its own branch, not caught by the broad except below --
+                # that one sleeps 3s and retries, which would just re-raise this same
+                # Cancelled next iteration (cancel_check() is still true) instead of
+                # actually stopping, and CONTINUATION_MAX_ITERS is small enough that
+                # it could burn through the whole finish-mode budget doing that.
+                return "Interrupted by user. Session state was saved."
             except Exception as exc:
                 self.ui.event("finish", f"model error: {type(exc).__name__}")
                 time.sleep(3)

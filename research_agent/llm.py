@@ -261,12 +261,23 @@ def _chat_completion_like(content: str | None, tool_calls: list[SimpleNamespace]
 _DEEPSEEK_LEGACY_ALIASES = {"deepseek-chat", "deepseek-v3", "deepseek-v3-0324"}
 
 
+class Cancelled(Exception):
+    """Raised by _with_retry/_codex_retry when cancel_check() flips true while a
+    call is between attempts (queued for its next request or mid-backoff-sleep) --
+    NOT while an attempt is actually in flight (a blocking HTTP call can't be
+    interrupted from here without a bigger async/threading rework). Callers that
+    care about a clean "user cancelled" outcome (GeneralAgent.run()) should catch
+    this the same way they already catch KeyboardInterrupt, rather than treating it
+    as a normal API failure worth retrying or reporting as an error."""
+
+
 class LLMClient:
     def __init__(
         self,
         model: str | None = None,
         provider: str | None = None,
         reasoning_effort: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ):
         self.provider = _provider(provider)
         raw = model or _default_model(self.provider)
@@ -275,8 +286,26 @@ class LLMClient:
             raw = "deepseek-v4-flash"
         self.model = raw
         self.reasoning_effort = reasoning_effort or _reasoning_effort_for_model(self.provider, raw)
+        self._cancel_check = cancel_check
         self._codex_token: str | None = None
         self._client: OpenAI | None = None
+
+    def _check_cancelled(self) -> None:
+        if self._cancel_check is not None and self._cancel_check():
+            raise Cancelled("Cancelled between LLM call attempts.")
+
+    def _sleep_cancellable(self, seconds: float) -> None:
+        """time.sleep(seconds), but checked in small slices so a cancel_check() flip
+        mid-backoff takes effect within ~0.5s instead of only after the full sleep
+        (which, at this class's own 60s-cap backoff, was the dominant reason a
+        cancel button would feel unresponsive for a real turn stuck retrying)."""
+        deadline = time.monotonic() + seconds
+        while True:
+            self._check_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.5, remaining))
 
     def _client_or_create(self) -> OpenAI:
         if self._client is None:
@@ -363,6 +392,7 @@ class LLMClient:
     def _with_retry(self, fn: Callable[[], Any]) -> Any:
         max_retries = self._MAX_RETRIES
         for attempt in range(max_retries + 1):
+            self._check_cancelled()
             try:
                 return fn()
             except Exception as exc:
@@ -373,7 +403,7 @@ class LLMClient:
                         f"retry {attempt + 1}/{max_retries} in {wait:.1f}s…",
                         flush=True,
                     )
-                    time.sleep(wait)
+                    self._sleep_cancellable(wait)
                 else:
                     raise
 
@@ -497,6 +527,7 @@ class LLMClient:
         max_retries = int(get_env("CODEX_MAX_RETRIES", "8"))
         retry_sleep = float(get_env("CODEX_RETRY_SLEEP", "3.5"))
         for attempt in range(max_retries + 1):
+            self._check_cancelled()
             try:
                 return fn()
             except Exception as exc:
@@ -504,11 +535,11 @@ class LLMClient:
                     raise
                 if self._codex_is_rate_limit(exc):
                     print(f"[Codex] 429 rate limit; retrying in {retry_sleep}s ({attempt + 1}/{max_retries})...")
-                    time.sleep(retry_sleep)
+                    self._sleep_cancellable(retry_sleep)
                     continue
                 if self._is_transient(exc):
                     print(f"[Codex] transient error ({type(exc).__name__}); retrying in {retry_sleep}s ({attempt + 1}/{max_retries})...")
-                    time.sleep(retry_sleep)
+                    self._sleep_cancellable(retry_sleep)
                     continue
                 raise
 
