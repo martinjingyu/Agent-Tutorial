@@ -751,6 +751,7 @@ class GeneralAgent:
                 # false "Recovered missing tool result" error for each one.
                 if self._runtime.get("_pending_images"):
                     self._inject_pending_images(messages, self._runtime)
+                    self._compress_previous_images(messages)
                 if interrupted:
                     if final_text:
                         break
@@ -931,6 +932,38 @@ class GeneralAgent:
         pending = runtime.pop("_pending_images", None)
         if pending:
             messages.append({"role": "user", "content": pending})
+
+    def _compress_previous_images(self, messages: list[dict[str, Any]]) -> None:
+        """Mirrors _compress_previous_snapshot's pattern for view_image (see
+        tools/vision.py + _inject_pending_images): once a new batch of images has
+        just been injected as the newest image-carrying message, strip the pixel
+        data out of the SECOND-most-recent image batch (the one that was "current"
+        until this call). Called every time a new batch arrives, so each older
+        batch gets compressed exactly once, right when it stops being the most
+        recent -- at most one batch ever carries live pixel data at a time. The
+        model already reasoned over those pixels in an earlier step of this same
+        turn; resending them unchanged on every later call is pure repeated cost
+        with no new information. Text labels (path, focus question) are kept in
+        place so there's still a paper trail of what was reviewed and why."""
+        found = 0
+        for index in range(len(messages) - 1, -1, -1):
+            msg = messages[index]
+            content = msg.get("content")
+            if msg.get("role") != "user" or not isinstance(content, list):
+                continue
+            if not any(isinstance(p, dict) and p.get("type") == "image_url" for p in content):
+                continue
+            found += 1
+            if found != 2:
+                continue
+            new_content = [
+                {"type": "text", "text": "[image content omitted here -- already reviewed in an earlier step of this turn]"}
+                if isinstance(part, dict) and part.get("type") == "image_url"
+                else part
+                for part in content
+            ]
+            messages[index] = {**msg, "content": new_content}
+            return
 
     def _compress_previous_snapshot(self, messages: list[dict[str, Any]]) -> None:
         found = 0

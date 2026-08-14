@@ -8,6 +8,14 @@ result. The agent loop (see agent.py's main tool-call loop, which flushes
 _pending_images once after each full batch of tool_calls is processed) then
 appends a synthetic user message carrying the actual image content parts, so the
 image is delivered as part of the *next* model turn -- not this tool result.
+
+Only the most recently injected batch ever carries live pixel data: as soon as a
+newer batch is injected, agent.py's _compress_previous_images() strips the
+previous batch's image_url parts down to a text placeholder (the text labels --
+path, focus question -- are kept). Otherwise every iteration for the rest of the
+turn would resend every image ever viewed, in full, again -- pure repeated token
+cost with no new information, and the single biggest driver of a VisualAuditor-
+style turn blowing past the compaction threshold on image volume alone.
 """
 from __future__ import annotations
 
