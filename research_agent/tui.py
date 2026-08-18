@@ -12,6 +12,7 @@ Layout (bottom of terminal, scrolls up as agents print):
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re as _re
@@ -19,7 +20,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 _ENABLED = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 
@@ -124,6 +125,14 @@ class LiveDashboard:
                 cls._instance = cls()
         return cls._instance
 
+    @classmethod
+    def active(cls) -> "LiveDashboard | None":
+        """Like get(), but never creates one -- for callers that need to coordinate
+        with an already-running dashboard (e.g. pausing it around a blocking input()
+        prompt) without spinning up a redraw thread in contexts where no dashboard
+        was ever started."""
+        return cls._instance
+
     def __init__(self) -> None:
         self._lock   = threading.Lock()
         self._slots:  dict[str, _Slot] = {}
@@ -131,6 +140,7 @@ class LiveDashboard:
         self._drawn   = 0
         self._enabled = _ENABLED
         self._stop    = threading.Event()
+        self._paused  = threading.Event()
 
         # Lazy-loaded sessions dir (avoids import-time side effects)
         self._sessions_dir: Path | None = None
@@ -194,7 +204,11 @@ class LiveDashboard:
         with self._lock:
             self._erase()
             sys.__stdout__.write(line + "\n")
-            self._draw()
+            # While paused (a blocking input() prompt is on screen elsewhere, see
+            # paused()), skip redrawing the panel -- it would land right on top of
+            # that prompt. The next unpaused tick (or paused()'s own exit) redraws.
+            if not self._paused.is_set():
+                self._draw()
             sys.__stdout__.flush()
 
     def stop(self) -> None:
@@ -202,6 +216,26 @@ class LiveDashboard:
         with self._lock:
             self._erase()
             sys.__stdout__.flush()
+
+    @contextlib.contextmanager
+    def paused(self) -> Iterator[None]:
+        """Suspend the background redraw thread and erase the currently-drawn panel,
+        for the duration of a blocking terminal prompt (input()) that a caller needs
+        to run cleanly -- without this, the redraw thread's own erase/redraw cycle
+        (every 0.25s, via raw cursor-movement ANSI codes) races with whatever the
+        caller prints/reads, corrupting both. Resumes drawing on exit; safe to nest
+        or call when the dashboard was never started (self._enabled is False)."""
+        if not self._enabled:
+            yield
+            return
+        self._paused.set()
+        with self._lock:
+            self._erase()
+            sys.__stdout__.flush()
+        try:
+            yield
+        finally:
+            self._paused.clear()
 
     # ── Rendering ─────────────────────────────────────────────────────────
 
@@ -287,6 +321,8 @@ class LiveDashboard:
 
     def _run(self) -> None:
         while not self._stop.wait(0.25):
+            if self._paused.is_set():
+                continue
             with self._lock:
                 self._maybe_scan()
                 self._erase()
