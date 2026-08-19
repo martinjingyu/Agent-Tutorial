@@ -370,6 +370,18 @@ class LLMClient:
         )
         if status == 429:
             return True
+        # A 400 is deliberately NOT retried in general -- it almost always means the
+        # request itself is wrong and resending it unchanged would just fail the same
+        # way. "prompt_cache_retention is not supported on this model" is a narrow,
+        # observed exception: we never set that field ourselves (it isn't in
+        # _codex_session_kwargs()), the exact same request kwargs succeed on a retry
+        # moments later, and it only ever comes from the chatgpt.com/backend-api/codex
+        # proxy -- all consistent with the proxy occasionally routing a request to a
+        # backend instance that mis-derives this field server-side, not with a bug in
+        # what we send. Matched on the literal parameter name so this can't
+        # accidentally swallow an unrelated, genuinely-broken 400.
+        if status == 400 and "prompt_cache_retention" in str(exc):
+            return True
         # Any 5xx, not just the standard handful -- Cloudflare-fronted backends (e.g.
         # chatgpt.com/backend-api/codex) also return their own extended codes like 520
         # ("unknown error")/521/522/524/etc. for transient origin/proxy hiccups, and
