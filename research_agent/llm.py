@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
 
+import httpx
 from openai import OpenAI
 
 from .env import get_env
@@ -355,13 +356,25 @@ class LLMClient:
     @staticmethod
     def _is_transient(exc: Exception) -> bool:
         """True for timeout / connection / protocol / 5xx errors that are worth
-        retrying. "ProtocolError" covers httpx.RemoteProtocolError /
-        httpcore.RemoteProtocolError ("peer closed connection without sending
-        complete message body") -- the mid-stream disconnect _codex_retry's own
-        docstring already describes, which has no status_code (it's a transport-
-        level break, not an HTTP response) so it fell through this check entirely
-        until this was added, meaning the retry loop built for exactly this case
-        never actually caught it."""
+        retrying.
+
+        Checks isinstance(exc, httpx.TransportError) first -- that one base class
+        covers the whole family of transport-level failures the openai SDK can raise
+        through httpx (ConnectError, ConnectTimeout, ReadError, ReadTimeout,
+        WriteError, WriteTimeout, PoolTimeout, RemoteProtocolError,
+        LocalProtocolError, ProxyError, ...), none of which carry a status_code
+        (they never got an HTTP response at all) so they'd otherwise fall through
+        this check entirely. This used to be a substring match against the
+        exception's class name instead ("Timeout"/"Connection"/"ProtocolError"),
+        added one observed exception at a time as each one broke the retry loop it
+        was supposed to be caught by -- ConnectError being the most recent ("SSL:
+        UNEXPECTED_EOF_WHILE_READING" mid-handshake) -- isinstance against the real
+        base class closes that whole class of gap at once instead of the next one
+        showing up as a fresh bug report. The substring match stays as a fallback for
+        non-httpx transient signals (e.g. a "ServiceUnavailable" from some other
+        exception hierarchy this project's error surface has seen)."""
+        if isinstance(exc, httpx.TransportError):
+            return True
         name = type(exc).__name__
         if any(k in name for k in ("Timeout", "Connection", "ServiceUnavailable", "ProtocolError")):
             return True
