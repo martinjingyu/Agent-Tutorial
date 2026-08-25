@@ -115,6 +115,16 @@ NOTES_TOOL_NAME = "save_research_notes"
 PREVIOUS_SNAPSHOT_LIMIT = 2_000
 PREVIOUS_READ_FILE_LIMIT = 500
 CONTINUATION_MAX_ITERS = 30
+LIVE_IMAGE_BATCH_WINDOW = 3
+"""How many of the most recent view_image batches keep live pixel data --
+_compress_previous_images() strips the rest to text placeholders. 1 would mean only
+the single most recent batch is ever visible, which forces a caller comparing two or
+more images (a duplicate pair, a before/after crop, two contact sheets) to re-call
+view_image on something it already looked at just to get its pixels back in view --
+observed in practice as roughly a third of one agent's tool-call budget in a turn
+being pure re-opens of already-viewed paths. 3 keeps enough recent context for a
+typical multi-image comparison without reverting to resending everything the turn
+has ever viewed (the token-cost problem this compression exists to solve)."""
 TRAJECTORY_COMPRESS_THRESHOLD = 180_000
 COMPACT_MIN_GAP = 3
 """Minimum iterations between any two automatic compactions (pre-action check,
@@ -949,14 +959,17 @@ class GeneralAgent:
         """Mirrors _compress_previous_snapshot's pattern for view_image (see
         tools/vision.py + _inject_pending_images): once a new batch of images has
         just been injected as the newest image-carrying message, strip the pixel
-        data out of the SECOND-most-recent image batch (the one that was "current"
-        until this call). Called every time a new batch arrives, so each older
-        batch gets compressed exactly once, right when it stops being the most
-        recent -- at most one batch ever carries live pixel data at a time. The
-        model already reasoned over those pixels in an earlier step of this same
-        turn; resending them unchanged on every later call is pure repeated cost
-        with no new information. Text labels (path, focus question) are kept in
-        place so there's still a paper trail of what was reviewed and why."""
+        data out of the batch that just fell out of the LIVE_IMAGE_BATCH_WINDOW most
+        recent batches. Called every time a new batch arrives, so each older batch
+        gets compressed exactly once, right when it stops being within the window --
+        at most LIVE_IMAGE_BATCH_WINDOW batches ever carry live pixel data at once.
+        Comparing two or more images (a duplicate pair, a before/after crop, two
+        contact sheets) needs more than one batch live at a time, or the model has no
+        way to do that comparison except re-calling view_image on something it
+        already looked at purely to get its pixels back in view -- pure repeated cost
+        that also burns iteration budget for zero new information. Text labels (path,
+        focus question) are kept in place on a compressed batch so there's still a
+        paper trail of what was reviewed and why."""
         found = 0
         for index in range(len(messages) - 1, -1, -1):
             msg = messages[index]
@@ -966,7 +979,7 @@ class GeneralAgent:
             if not any(isinstance(p, dict) and p.get("type") == "image_url" for p in content):
                 continue
             found += 1
-            if found != 2:
+            if found != LIVE_IMAGE_BATCH_WINDOW + 1:
                 continue
             new_content = [
                 {"type": "text", "text": "[image content omitted here -- already reviewed in an earlier step of this turn]"}
