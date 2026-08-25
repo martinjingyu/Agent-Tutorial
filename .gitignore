@@ -5,3 +5,4 @@ __pycache__/
 /.agentbrowser/
 /research_agent/.agentbrowser/
 /sessions/.tool_cache/
+/sessions

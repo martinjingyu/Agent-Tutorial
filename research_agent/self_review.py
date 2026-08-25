@@ -19,6 +19,7 @@ def trigger_self_review(
     skills_index: str,
     model: str,
     provider: str,
+    extra_instruction: str = "",
     background: bool = True,
 ) -> None:
     """Run post-turn self-review without blocking the user's response."""
@@ -34,6 +35,7 @@ def trigger_self_review(
                 skills_index=skills_index,
                 model=model,
                 provider=provider,
+                extra_instruction=extra_instruction,
             )
         except Exception as exc:
             print(f"[SelfReview:{session_id}] failed (non-fatal): {exc}")
@@ -54,20 +56,33 @@ def _run_self_review(
     skills_index: str,
     model: str,
     provider: str,
+    extra_instruction: str = "",
 ) -> None:
-    allowed = {"memory", "skills_list", "skill_view", "skill_manage"}
+    allowed = {
+        "memory",
+        "skills_list",
+        "skill_view",
+        "skill_manage",
+        "self_code_search",
+        "self_code_read",
+        "self_code_patch",
+    }
     tools = [tool for tool in registry.definitions() if tool["function"]["name"] in allowed]
     llm = LLMClient(model=model, provider=provider)
 
+    instruction = SELF_REVIEW_PROMPT
+    if extra_instruction.strip():
+        instruction += "\n\nManual self-review request:\n" + extra_instruction.strip()
+
     review_messages: list[dict[str, Any]] = [
-        {"role": "system", "content": build_system_prompt(skills_index)},
+        {"role": "system", "content": build_system_prompt(skills_index, agent_role="self_review")},
         {
             "role": "user",
             "content": (
                 "Conversation transcript for self-review:\n\n"
                 + format_review_transcript(messages)
                 + "\n\n"
-                + SELF_REVIEW_PROMPT
+                + instruction
             ),
         },
     ]

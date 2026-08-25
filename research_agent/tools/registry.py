@@ -40,6 +40,14 @@ class ToolRegistry:
                 ensure_ascii=False,
             )
 
+    def without(self, names: set[str]) -> "ToolRegistry":
+        """Return a new registry with the given tool names excluded."""
+        filtered = ToolRegistry()
+        for name, tool in self._tools.items():
+            if name not in names:
+                filtered._tools[name] = tool
+        return filtered
+
     @property
     def names(self) -> set[str]:
         return set(self._tools)

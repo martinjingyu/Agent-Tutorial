@@ -3,7 +3,7 @@
 > **候选人**: {name}
 > **应聘职位**: {applied_position}
 > **调研日期**: {date}
-> **存储路径**: `reports/{name}/link-verification.md`
+> **存储路径**: `candidates/{name}/link-verification.md`（所有候选人报告统一保存在 candidates/ 下）
 
 ### 候选人背景摘要
 

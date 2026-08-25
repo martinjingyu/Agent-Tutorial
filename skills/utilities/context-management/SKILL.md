@@ -14,14 +14,17 @@ description: 上下文管理最佳实践。指导 agent 在何时以及如何主
 
 > **Compact 不是失败，而是主动的认知整理。在开始新任务前清理旧上下文，比等到 token 超阈值再被动 compact 更有效。**
 
-## Pre-loop compact review（新）
+## Pre-loop compact review（默认关闭）
 
-`agent.py` 内置了 `_pre_loop_compact_review` 机制，在 **每次 agent loop 开始之前**（即处理用户消息之前）执行：
+`agent.py` 内置了 `_pre_loop_compact_review` 机制，在 **每次 agent loop 开始之前**（即处理用户消息之前）执行。
 
-### 触发条件
+**该机制默认关闭**（`GeneralAgent(semantic_review=False)`），因为它会在每一轮用户消息上都多打一次 LLM 调用去做"是否需要 compact"的语义判断，对大多数不需要 compact 的轮次也会产生额外延迟和成本。已有的阈值型触发（token/字符数，见下文）足以兜住上下文失控的情况。如果任务场景里经常出现"同一 session 内切换到完全独立的新任务"（比如批量调研多个学校/候选人），可以显式传入 `semantic_review=True` 打开这个语义级清理。
 
-1. 历史消息 ≥ 6 条
-2. 调用 LLM 判断：**新用户消息是否代表一个与之前对话独立的新任务**
+### 触发条件（开启后）
+
+1. `semantic_review=True`
+2. 历史消息 ≥ 6 条
+3. 调用 LLM 判断：**新用户消息是否代表一个与之前对话独立的新任务**
 
 ### LLM 判断逻辑
 
@@ -47,12 +50,13 @@ LLM 收到一个 review prompt，包含：
 
 ### 与自动 compact 的关系
 
-| 机制 | 触发时机 | 判断方式 | 目的 |
-|------|---------|---------|------|
-| `_pre_loop_compact_review` | loop 开始前 | LLM 语义判断 | 跨任务边界清理 |
-| `_pre_action_compact_check` | tool_calls 执行前 | 硬阈值（数量+token） | 同任务内防溢出 |
+| 机制 | 触发时机 | 判断方式 | 目的 | 默认 |
+|------|---------|---------|------|------|
+| `_pre_loop_compact_review` | loop 开始前 | LLM 语义判断 | 跨任务边界清理 | 关闭 |
+| `_pre_action_compact_check` | tool_calls 执行前 | 硬阈值（数量+token） | 同任务内防溢出 | 开启 |
+| 轨迹/token 阈值（循环内统一判断） | 每轮迭代 | 硬阈值（字符数 or token，二选一命中即触发） | 防上下文失控 | 开启 |
 
-两者互补：pre-loop 负责**任务级别的语义压缩**，pre-action 负责**token 级别的防溢出压缩**。
+三者共用同一个全局冷却计数器 `_last_compact_iter`：任意一次自动压缩发生后，`COMPACT_MIN_GAP`（3 轮迭代）内其他自动触发点都会被抑制，避免同一时间窗口内被不同触发条件反复压缩、白白多打 LLM 摘要调用。手动 `compact_context` 工具请求不受此冷却限制（这是 LLM 主动做出的明确决策），但触发后同样会刷新冷却计数器。
 
 ## 自动 compact 机制（原有）
 
@@ -174,6 +178,50 @@ python run_research_agent.py --guardian --chat
 → 调用 `request_restart(changes=["更新 system prompt，强调 read_file 优先"])`
 → 进程退出，Guardian 自动重启
 → 新进程加载了修改后的 prompts.py
+
+## High-Level 调度 Agent 行为红线（2026-06-30 新增）
+
+作为调度 agent，以下行为**严格禁止**：
+
+### 红线 1：Worker 出错时不要自行补救
+
+如果 worker 报错、输出不符合预期、或文件写入失败，**不要自己动手写文件来"补上"**。
+
+```
+❌ 错误做法：worker 写 paper_idea.md 失败 → 我自己 write_file 写一份
+✅ 正确做法：kanban_show_task 查看错误 → 向用户报告错误详情 → 让用户决定下一步
+```
+
+理由：我是调度 agent，不是 worker。自行补救会：
+- 掩盖 worker 的真实问题（bug、配置错误、权限问题）
+- 让用户误以为 pipeline 正常完成
+- 绕过 skill 中定义的质量控制流程
+
+### 红线 2：不要反复读 worker 内部 session 缓存文件
+
+不要用 `read_file` 读 `sessions/kanban/*/workers/*.json` 来轮询 worker 状态。
+
+```
+❌ 错误做法：read_file('sessions/kanban/board/workers/t_xxx.json') 反复读
+✅ 正确做法：
+   1. kanban_show_task(board, task_id) 检查状态
+   2. kanban_notify_subscribe(board, events=['pipeline_complete']) 订阅通知
+   3. respond_to_user 结束本轮，等通知触发
+```
+
+理由：
+- 缓存文件是内部实现细节，格式可能变化
+- 轮询浪费 token（每次 read_file 结果都进上下文）
+- 订阅机制就是为这个场景设计的
+
+### 红线 3：不要空等
+
+任务发起后，不要反复 poll 状态或等待 worker 完成。
+
+```
+❌ 错误做法：kanban_dispatch → read_file(worker cache) → 循环
+✅ 正确做法：kanban_dispatch → kanban_notify_subscribe → respond_to_user
+```
 
 ## 不要 compact 的场景
 

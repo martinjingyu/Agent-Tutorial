@@ -5,7 +5,7 @@ import json
 import time
 from pathlib import Path
 
-from ..safety import resolve_workspace_path
+from ..safety import resolve_readable_path, resolve_workspace_path
 from .registry import json_result, registry
 
 
@@ -17,10 +17,10 @@ _SEARCH_REPEAT_STATE: dict[str, tuple[tuple[object, ...], int]] = {}
 def _resolve_readable_path(raw_path: str | None) -> Path:
     if not raw_path:
         raise ValueError("path is required")
-    try:
-        return resolve_workspace_path(raw_path)
-    except ValueError:
-        return Path(raw_path).expanduser().resolve()
+    # Read-only tools are unrestricted (see resolve_readable_path's docstring) --
+    # kept as a separate wrapper only because read_file/read_pdf/search_files treat
+    # a missing path as required up front, unlike write_file's default-to-base callers.
+    return resolve_readable_path(raw_path)
 
 
 def _extract_docx_text(path: Path) -> str:
@@ -48,6 +48,19 @@ def _extract_docx_text(path: Path) -> str:
         return f"[ERROR extracting .docx content: {exc}]"
 
 
+def _extract_pdf_text(path: Path) -> str:
+    try:
+        import fitz
+        doc = fitz.open(str(path))
+        pages = [page.get_text().strip() for page in doc if page.get_text().strip()]
+        doc.close()
+        return "\n\n".join(pages)
+    except ImportError:
+        return "[ERROR: PyMuPDF not installed. Run: pip install pymupdf]"
+    except Exception as exc:
+        return f"[ERROR extracting PDF: {exc}]"
+
+
 def _read_file(args: dict, runtime: dict) -> str:
     raw_path = args.get("path")
     max_chars = int(args.get("max_chars") or 20000)
@@ -55,9 +68,11 @@ def _read_file(args: dict, runtime: dict) -> str:
     path = _resolve_readable_path(raw_path)
     if not path.is_file():
         return json_result(success=False, error=f"File not found: {path}")
-    # Handle .docx files
-    if path.suffix.lower() == ".docx":
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
         text = _extract_docx_text(path)
+    elif suffix == ".pdf":
+        text = _extract_pdf_text(path)
     else:
         text = path.read_text(encoding="utf-8", errors="replace")
     total_chars = len(text)
@@ -79,13 +94,46 @@ def _write_file(args: dict, runtime: dict) -> str:
     content = args.get("content")
     if content is None:
         return json_result(success=False, error="content is required")
+    if str(content) == "" and not args.get("allow_empty"):
+        return json_result(
+            success=False,
+            error=(
+                "content is empty. If this is a large generated document, generate and write it "
+                "in smaller chunks with write_file for the first chunk and append_file for the rest."
+            ),
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(str(content), encoding="utf-8")
     return json_result(success=True, path=str(path), bytes=len(str(content).encode("utf-8")))
 
 
+def _append_file(args: dict, runtime: dict) -> str:
+    path = resolve_workspace_path(args.get("path"))
+    content = args.get("content")
+    if content is None:
+        return json_result(success=False, error="content is required")
+    if str(content) == "" and not args.get("allow_empty"):
+        return json_result(
+            success=False,
+            error=(
+                "content is empty. Large append operations should be split into smaller chunks; "
+                "do not retry the same empty append."
+            ),
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = str(content)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(text)
+    return json_result(
+        success=True,
+        path=str(path),
+        bytes=len(text.encode("utf-8")),
+        total_bytes=path.stat().st_size,
+    )
+
+
 def _list_files(args: dict, runtime: dict) -> str:
-    root = resolve_workspace_path(args.get("path") or ".")
+    root = resolve_readable_path(args.get("path") or ".")
     max_results = int(args.get("max_results") or 200)
     if root.is_file():
         return json_result(success=True, files=[str(root)])
@@ -93,7 +141,7 @@ def _list_files(args: dict, runtime: dict) -> str:
     for item in root.rglob("*"):
         if ".git" in item.parts or "__pycache__" in item.parts:
             continue
-        files.append(str(item.relative_to(resolve_workspace_path("."))))
+        files.append(str(item.relative_to(root)))
         if len(files) >= max_results:
             break
     return json_result(success=True, root=str(root), files=files, truncated=len(files) >= max_results)
@@ -305,14 +353,51 @@ registry.register(
 registry.register(
     "write_file",
     {
-        "description": "Write a UTF-8 text file inside the Code workspace. Use this to save reports or update project files.",
+        "description": (
+            "Write a UTF-8 text file inside the Code workspace. Use this for small/medium complete files. "
+            "For large generated files, write in chunks under roughly 8,000-12,000 characters: "
+            "use write_file for the first chunk and append_file for subsequent chunks so progress is visible "
+            "and tool arguments stay below model output limits. Empty content is rejected unless allow_empty=true."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+                "allow_empty": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Set true only when intentionally creating an empty file.",
+                },
+            },
             "required": ["path", "content"],
         },
     },
     _write_file,
+)
+registry.register(
+    "append_file",
+    {
+        "description": (
+            "Append UTF-8 text to an existing or new workspace file. For large generated files, "
+            "use write_file for the first chunk and append_file for subsequent chunks. Keep each chunk "
+            "under roughly 8,000-12,000 characters. Empty content is rejected unless allow_empty=true."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+                "allow_empty": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Set true only when intentionally appending nothing.",
+                },
+            },
+            "required": ["path", "content"],
+        },
+    },
+    _append_file,
 )
 registry.register(
     "list_files",
@@ -373,3 +458,97 @@ registry.register(
     _patch_file,
 )
 
+
+def _read_pdf(args: dict, runtime: dict) -> str:
+    path = _resolve_readable_path(args.get("path"))
+    max_chars = int(args.get("max_chars") or 50000)
+    if not path.is_file():
+        return json_result(success=False, error=f"File not found: {path}")
+    if path.suffix.lower() != ".pdf":
+        return json_result(success=False, error=f"Not a PDF file: {path}")
+    text = _extract_pdf_text(path)
+    pages = text.split("\n\n")
+    truncated = len(text) > max_chars
+    return json_result(
+        success=True,
+        path=str(path),
+        pages=len(pages),
+        content=text[:max_chars],
+        truncated=truncated,
+    )
+
+
+def _read_url_pdf(args: dict, runtime: dict) -> str:
+    import tempfile
+    import urllib.request
+
+    url = (args.get("url") or "").strip()
+    if not url:
+        return json_result(success=False, error="url is required")
+    max_chars = int(args.get("max_chars") or 50000)
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+    except Exception as exc:
+        return json_result(success=False, error=f"Failed to download PDF: {exc}")
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = Path(tmp.name)
+        try:
+            text = _extract_pdf_text(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    except Exception as exc:
+        return json_result(success=False, error=f"Failed to extract PDF text: {exc}")
+
+    truncated = len(text) > max_chars
+    return json_result(
+        success=True,
+        url=url,
+        pages=text.count("\n\n") + 1,
+        content=text[:max_chars],
+        truncated=truncated,
+    )
+
+
+registry.register(
+    "read_pdf",
+    {
+        "description": (
+            "Extract text from a PDF file using PyMuPDF. "
+            "Returns full page text. Use for reading research papers, reports, or any PDF document."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to the PDF file"},
+                "max_chars": {"type": "integer", "default": 50000},
+            },
+            "required": ["path"],
+        },
+    },
+    _read_pdf,
+)
+
+registry.register(
+    "read_url_pdf",
+    {
+        "description": (
+            "Download and extract text from an online PDF given its URL. "
+            "Useful for reading research papers, reports, or any PDF accessible via a direct link."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Direct URL to the PDF file"},
+                "max_chars": {"type": "integer", "default": 50000},
+            },
+            "required": ["url"],
+        },
+    },
+    _read_url_pdf,
+)

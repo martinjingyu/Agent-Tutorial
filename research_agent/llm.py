@@ -3,12 +3,14 @@ from __future__ import annotations
 import base64
 import json
 import os
+import random
 import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
+import httpx
 from openai import OpenAI
 
 from .env import get_env
@@ -84,6 +86,25 @@ def _read_codex_access_token() -> str:
     raise RuntimeError("No Codex access token found. Run `codex login` first.")
 
 
+_REASONING_EFFORTS = {"minimal", "low", "medium", "high"}
+
+
+def _reasoning_effort_for_model(provider: str, model: str) -> str | None:
+    """Per-model thinking effort, independent of caller-supplied overrides.
+
+    Looks up <PROVIDER>_REASONING_EFFORT_<MODEL> first (e.g. deepseek + deepseek-v4-pro ->
+    DEEPSEEK_REASONING_EFFORT_DEEPSEEK_V4_PRO, codex + gpt-5.6-sol -> CODEX_REASONING_EFFORT_GPT_5_6_SOL)
+    so different models can run at different effort levels even under the same provider,
+    then falls back to the provider-generic <PROVIDER>_REASONING_EFFORT. Returns None (no
+    override, backend default) if neither is set or the value isn't a recognized effort.
+    """
+    slug = model.strip().upper().replace("-", "_").replace(".", "_")
+    prefix = provider.strip().upper()
+    effort = get_env(f"{prefix}_REASONING_EFFORT_{slug}") or get_env(f"{prefix}_REASONING_EFFORT")
+    effort = effort.strip().lower()
+    return effort if effort in _REASONING_EFFORTS else None
+
+
 def _codex_headers(token: str) -> dict[str, str]:
     headers: dict[str, str] = {
         "User-Agent": "codex_cli_rs/0.0.0",
@@ -101,6 +122,63 @@ def _codex_headers(token: str) -> dict[str, str]:
     return headers
 
 
+def _flatten_text_content(content: Any) -> str:
+    """Best-effort plain-text rendering of chat-completions-style content, for spots
+    (system instructions) where the Responses API only accepts a string -- any image
+    parts are dropped rather than stringified into garbage."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = [
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") in ("text", "input_text")
+        ]
+        if texts:
+            return "\n".join(texts)
+    return str(content)
+
+
+def _to_responses_content_parts(content: Any) -> list[dict[str, Any]]:
+    """Converts chat-completions-style content (a plain string, or a list of
+    {"type": "text", "text": ...} / {"type": "image_url", "image_url": {"url": ...}}
+    parts -- the format every other call site in this codebase already builds
+    messages in) into Responses API input parts (input_text / input_image).
+
+    Previously this always stringified non-str content with str(content), which for
+    a multimodal list silently turned an image part into an unusable Python repr
+    instead of an image the model could actually see."""
+    if isinstance(content, str):
+        return [{"type": "input_text", "text": content}]
+    if not isinstance(content, list):
+        return [{"type": "input_text", "text": str(content)}]
+
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            parts.append({"type": "input_text", "text": str(part)})
+            continue
+        part_type = part.get("type")
+        if part_type in ("text", "input_text"):
+            parts.append({"type": "input_text", "text": part.get("text", "")})
+            continue
+        if part_type in ("image_url", "input_image"):
+            image_url = part.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else (image_url or part.get("url"))
+            if not url:
+                continue
+            image_part: dict[str, Any] = {"type": "input_image", "image_url": url}
+            detail = image_url.get("detail") if isinstance(image_url, dict) else part.get("detail")
+            if detail:
+                image_part["detail"] = detail
+            parts.append(image_part)
+            continue
+        # Unknown part shape -- render it as readable text rather than silently
+        # dropping it, same fallback spirit as the old str(content) behavior.
+        parts.append({"type": "input_text", "text": json.dumps(part, ensure_ascii=False)})
+    return parts or [{"type": "input_text", "text": ""}]
+
+
 def _to_responses_input(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     instructions = ""
     items: list[dict[str, Any]] = []
@@ -110,11 +188,10 @@ def _to_responses_input(messages: list[dict[str, Any]]) -> tuple[str, list[dict[
         content = msg.get("content") or ""
 
         if role == "system":
-            instructions = content if isinstance(content, str) else str(content)
+            instructions = _flatten_text_content(content)
             continue
         if role == "user":
-            text = content if isinstance(content, str) else str(content)
-            items.append({"role": "user", "content": [{"type": "input_text", "text": text}]})
+            items.append({"role": "user", "content": _to_responses_content_parts(content)})
             continue
         if role == "assistant":
             if content:
@@ -176,17 +253,60 @@ def _make_tool_call(call_id: str, name: str, arguments: str) -> SimpleNamespace:
     )
 
 
-def _chat_completion_like(content: str | None, tool_calls: list[SimpleNamespace]) -> SimpleNamespace:
+def _chat_completion_like(content: str | None, tool_calls: list[SimpleNamespace], usage: Any = None) -> SimpleNamespace:
     message = SimpleNamespace(content=content, tool_calls=tool_calls)
-    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
+
+
+# Models that should be silently upgraded to deepseek-v4-flash
+_DEEPSEEK_LEGACY_ALIASES = {"deepseek-chat", "deepseek-v3", "deepseek-v3-0324"}
+
+
+class Cancelled(Exception):
+    """Raised by _with_retry/_codex_retry when cancel_check() flips true while a
+    call is between attempts (queued for its next request or mid-backoff-sleep) --
+    NOT while an attempt is actually in flight (a blocking HTTP call can't be
+    interrupted from here without a bigger async/threading rework). Callers that
+    care about a clean "user cancelled" outcome (GeneralAgent.run()) should catch
+    this the same way they already catch KeyboardInterrupt, rather than treating it
+    as a normal API failure worth retrying or reporting as an error."""
 
 
 class LLMClient:
-    def __init__(self, model: str | None = None, provider: str | None = None):
+    def __init__(
+        self,
+        model: str | None = None,
+        provider: str | None = None,
+        reasoning_effort: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ):
         self.provider = _provider(provider)
-        self.model = model or _default_model(self.provider)
+        raw = model or _default_model(self.provider)
+        # Upgrade legacy deepseek aliases → v4-flash
+        if self.provider == "deepseek" and raw in _DEEPSEEK_LEGACY_ALIASES:
+            raw = "deepseek-v4-flash"
+        self.model = raw
+        self.reasoning_effort = reasoning_effort or _reasoning_effort_for_model(self.provider, raw)
+        self._cancel_check = cancel_check
         self._codex_token: str | None = None
         self._client: OpenAI | None = None
+
+    def _check_cancelled(self) -> None:
+        if self._cancel_check is not None and self._cancel_check():
+            raise Cancelled("Cancelled between LLM call attempts.")
+
+    def _sleep_cancellable(self, seconds: float) -> None:
+        """time.sleep(seconds), but checked in small slices so a cancel_check() flip
+        mid-backoff takes effect within ~0.5s instead of only after the full sleep
+        (which, at this class's own 60s-cap backoff, was the dominant reason a
+        cancel button would feel unresponsive for a real turn stuck retrying)."""
+        deadline = time.monotonic() + seconds
+        while True:
+            self._check_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.5, remaining))
 
     def _client_or_create(self) -> OpenAI:
         if self._client is None:
@@ -196,22 +316,121 @@ class LLMClient:
     def _build_client(self) -> OpenAI:
         if self.provider == "codex":
             self._codex_token = _read_codex_access_token()
+            # A single float here sets connect/read/write/pool all to the same
+            # value. 120s is fine for a normal tool-calling turn, but gpt-5.6-sol
+            # at high reasoning effort on a large prompt (e.g. synthesizing a full
+            # meeting transcript in one call) can go well over two minutes before
+            # its first streamed byte -- that showed up as httpx.ReadTimeout with
+            # zero deltas ever yielded, not as a slow-but-working response.
+            # CODEX_TIMEOUT_SECONDS lets a caller raise this further for other
+            # long-reasoning workloads without editing this file.
+            codex_timeout = float(get_env("CODEX_TIMEOUT_SECONDS", "600"))
             return OpenAI(
                 api_key=self._codex_token,
                 base_url=get_env("CODEX_BASE_URL", CODEX_BASE_URL),
                 default_headers=_codex_headers(self._codex_token),
                 max_retries=0,
-                timeout=120.0,
+                timeout=codex_timeout,
             )
         if self.provider == "deepseek":
+            # Same reasoning as the codex branch above: a large prompt at high
+            # reasoning effort can go quiet past 120s before the first streamed
+            # byte, which surfaces as httpx.ReadTimeout with zero content ever
+            # received, not as a slow-but-working response.
+            deepseek_timeout = float(get_env("DEEPSEEK_TIMEOUT_SECONDS", "600"))
             return OpenAI(
                 api_key=get_env("DEEPSEEK_API_KEY"),
                 base_url=get_env("DEEPSEEK_BASE_URL", DEEPSEEK_BASE_URL),
+                timeout=deepseek_timeout,
+                max_retries=0,
             )
+        # Same reasoning as the codex/deepseek branches above.
+        openai_timeout = float(get_env("OPENAI_TIMEOUT_SECONDS", "600"))
         return OpenAI(
             api_key=get_env("OPENAI_API_KEY"),
             base_url=get_env("OPENAI_BASE_URL") or None,
+            timeout=openai_timeout,
+            max_retries=0,
         )
+
+    @staticmethod
+    def _is_transient(exc: Exception) -> bool:
+        """True for timeout / connection / protocol / 5xx errors that are worth
+        retrying.
+
+        Checks isinstance(exc, httpx.TransportError) first -- that one base class
+        covers the whole family of transport-level failures the openai SDK can raise
+        through httpx (ConnectError, ConnectTimeout, ReadError, ReadTimeout,
+        WriteError, WriteTimeout, PoolTimeout, RemoteProtocolError,
+        LocalProtocolError, ProxyError, ...), none of which carry a status_code
+        (they never got an HTTP response at all) so they'd otherwise fall through
+        this check entirely. This used to be a substring match against the
+        exception's class name instead ("Timeout"/"Connection"/"ProtocolError"),
+        added one observed exception at a time as each one broke the retry loop it
+        was supposed to be caught by -- ConnectError being the most recent ("SSL:
+        UNEXPECTED_EOF_WHILE_READING" mid-handshake) -- isinstance against the real
+        base class closes that whole class of gap at once instead of the next one
+        showing up as a fresh bug report. The substring match stays as a fallback for
+        non-httpx transient signals (e.g. a "ServiceUnavailable" from some other
+        exception hierarchy this project's error surface has seen)."""
+        if isinstance(exc, httpx.TransportError):
+            return True
+        name = type(exc).__name__
+        if any(k in name for k in ("Timeout", "Connection", "ServiceUnavailable", "ProtocolError")):
+            return True
+        status = getattr(exc, "status_code", None) or getattr(
+            getattr(exc, "response", None), "status_code", None
+        )
+        if status == 429:
+            return True
+        # A 400 is deliberately NOT retried in general -- it almost always means the
+        # request itself is wrong and resending it unchanged would just fail the same
+        # way. "prompt_cache_retention is not supported on this model" is a narrow,
+        # observed exception: we never set that field ourselves (it isn't in
+        # _codex_session_kwargs()), the exact same request kwargs succeed on a retry
+        # moments later, and it only ever comes from the chatgpt.com/backend-api/codex
+        # proxy -- all consistent with the proxy occasionally routing a request to a
+        # backend instance that mis-derives this field server-side, not with a bug in
+        # what we send. Matched on the literal parameter name so this can't
+        # accidentally swallow an unrelated, genuinely-broken 400.
+        if status == 400 and "prompt_cache_retention" in str(exc):
+            return True
+        # Any 5xx, not just the standard handful -- Cloudflare-fronted backends (e.g.
+        # chatgpt.com/backend-api/codex) also return their own extended codes like 520
+        # ("unknown error")/521/522/524/etc. for transient origin/proxy hiccups, and
+        # those are just as safe to retry as a plain 502/503.
+        return isinstance(status, int) and 500 <= status < 600
+
+    _MAX_RETRIES = 5
+
+    @classmethod
+    def _retry_wait(cls, attempt: int) -> float:
+        """Exponential backoff (5s, 10s, 20s, 40s, capped at 60s) plus up to 3s of
+        random jitter. The jitter matters more than usual here: callers like
+        Agent-Meeting fire several participants' LLM calls concurrently, so without
+        jitter every one of them would retry in lockstep on the same schedule -- if a
+        shared rate/concurrency limit caused the failures in the first place, retrying
+        in lockstep just recreates the same burst that tripped it."""
+        base = min(5 * (2 ** attempt), 60)
+        return base + random.uniform(0, 3)
+
+    def _with_retry(self, fn: Callable[[], Any]) -> Any:
+        max_retries = self._MAX_RETRIES
+        for attempt in range(max_retries + 1):
+            self._check_cancelled()
+            try:
+                return fn()
+            except Exception as exc:
+                if attempt < max_retries and self._is_transient(exc):
+                    wait = self._retry_wait(attempt)
+                    print(
+                        f"[LLM] transient error ({type(exc).__name__}), "
+                        f"retry {attempt + 1}/{max_retries} in {wait:.1f}s…",
+                        flush=True,
+                    )
+                    self._sleep_cancellable(wait)
+                else:
+                    raise
 
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Any:
         if self.provider == "codex":
@@ -222,15 +441,78 @@ class LLMClient:
             "messages": messages,
             "tools": tools or None,
             "tool_choice": "auto" if tools else None,
-            "temperature": float(get_env("AGENT_TEMPERATURE", "0.2")),
         }
         if self.provider == "deepseek":
-            extra_body = _deepseek_extra_body()
+            extra_body = self._deepseek_reasoning_kwargs()
             if extra_body:
                 kwargs["extra_body"] = extra_body
-        return self._client_or_create().chat.completions.create(**kwargs)
+            if self.reasoning_effort:
+                kwargs["reasoning_effort"] = self.reasoning_effort
 
-    def complete_text(self, prompt: str, *, temperature: float = 0.2) -> str:
+        return self._with_retry(lambda: self._client_or_create().chat.completions.create(**kwargs))
+
+    def chat_stream(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]):
+        """Yields text deltas as they arrive instead of blocking until the full
+        response is ready like chat() does -- useful for a long, slow call (e.g. a
+        big synthesis prompt at high reasoning effort) where a caller wants live
+        proof the connection is still alive rather than a silent multi-minute wait
+        that's indistinguishable from a hang until it either finishes or times out.
+
+        Deliberately no automatic retry here, unlike chat()/_with_retry: retrying a
+        partially-yielded stream would either duplicate text already handed to the
+        caller or require buffering everything anyway, which defeats the point of
+        streaming. A failure (including on the very first byte) propagates as an
+        exception; callers that want retry semantics should use chat() instead."""
+        if self.provider == "codex":
+            instructions, input_items = _to_responses_input(messages)
+            kwargs: dict[str, Any] = {
+                "model": self.model,
+                "input": input_items,
+                **({"reasoning": {"effort": self.reasoning_effort}} if self.reasoning_effort else {}),
+                **self._codex_session_kwargs(),
+            }
+            if instructions:
+                kwargs["instructions"] = instructions
+            if tools:
+                kwargs["tools"] = _convert_tools_for_responses(tools)
+                kwargs["tool_choice"] = "auto"
+                kwargs["parallel_tool_calls"] = True
+            with self._client_or_create().responses.stream(**kwargs) as stream:
+                for event in stream:
+                    if event.type == "response.output_text.delta" and event.delta:
+                        yield event.delta
+            return
+
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "tools": tools or None,
+            "tool_choice": "auto" if tools else None,
+            "stream": True,
+        }
+        if self.provider == "deepseek":
+            extra_body = self._deepseek_reasoning_kwargs()
+            if extra_body:
+                kwargs["extra_body"] = extra_body
+            if self.reasoning_effort:
+                kwargs["reasoning_effort"] = self.reasoning_effort
+        for chunk in self._client_or_create().chat.completions.create(**kwargs):
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+
+    def _deepseek_reasoning_kwargs(self) -> dict[str, Any] | None:
+        extra_body = _deepseek_extra_body()
+        # A caller-supplied reasoning_effort always implies thinking must be on --
+        # DEEPSEEK_THINKING=disabled (the default) would otherwise silently discard
+        # the effort level the caller explicitly asked for.
+        if self.reasoning_effort:
+            extra_body = {**(extra_body or {}), "thinking": {"type": "enabled"}}
+        return extra_body
+
+    def complete_text(self, prompt: str) -> str:
         if self.provider == "codex":
             model = get_env("CODEX_COMPACTION_MODEL") or get_env("COMPACTION_MODEL") or self.model
             return self._codex_complete(prompt, model=model)
@@ -238,13 +520,15 @@ class LLMClient:
         kwargs: dict[str, Any] = {
             "model": get_env("COMPACTION_MODEL", self.model),
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
         }
         if self.provider == "deepseek":
-            extra_body = _deepseek_extra_body()
+            extra_body = self._deepseek_reasoning_kwargs()
             if extra_body:
                 kwargs["extra_body"] = extra_body
-        response = self._client_or_create().chat.completions.create(**kwargs)
+            if self.reasoning_effort:
+                kwargs["reasoning_effort"] = self.reasoning_effort
+
+        response = self._with_retry(lambda: self._client_or_create().chat.completions.create(**kwargs))
         return response.choices[0].message.content or ""
 
     def _codex_session_kwargs(self) -> dict[str, Any]:
@@ -260,24 +544,44 @@ class LLMClient:
         return status == 429 or "rate limit" in str(exc).lower()
 
     def _codex_retry(self, fn):
+        # The Codex/ChatGPT backend intermittently drops the streaming connection
+        # mid-request ("Server disconnected without sending a response"), especially
+        # on turns carrying a bulky tool result (browser snapshots, search results).
+        # Without retrying those the same way _with_retry does for every other
+        # provider, a transient disconnect crashes the whole agent run.
         max_retries = int(get_env("CODEX_MAX_RETRIES", "8"))
         retry_sleep = float(get_env("CODEX_RETRY_SLEEP", "3.5"))
         for attempt in range(max_retries + 1):
+            self._check_cancelled()
             try:
                 return fn()
             except Exception as exc:
-                if self._codex_is_rate_limit(exc) and attempt < max_retries:
+                if attempt >= max_retries:
+                    raise
+                if self._codex_is_rate_limit(exc):
                     print(f"[Codex] 429 rate limit; retrying in {retry_sleep}s ({attempt + 1}/{max_retries})...")
-                    time.sleep(retry_sleep)
+                    self._sleep_cancellable(retry_sleep)
+                    continue
+                if self._is_transient(exc):
+                    print(f"[Codex] transient error ({type(exc).__name__}); retrying in {retry_sleep}s ({attempt + 1}/{max_retries})...")
+                    self._sleep_cancellable(retry_sleep)
                     continue
                 raise
 
     def _codex_complete(self, prompt: str, *, model: str) -> str:
         def run_once() -> str:
             text_parts: list[str] = []
+            # A caller-supplied reasoning_effort (e.g. judge.py's LLMClient(...,
+            # reasoning_effort="medium")) must win over the env-var lookup, mirroring
+            # _codex_chat's behavior below -- otherwise an explicit constructor value
+            # is silently discarded whenever the CODEX_REASONING_EFFORT* env vars
+            # aren't set (the common case), and the call runs at whatever the backend's
+            # own default happens to be instead of what the caller asked for.
+            effort = self.reasoning_effort or _reasoning_effort_for_model(self.provider, model)
             with self._client_or_create().responses.stream(
                 model=model,
                 input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}]}],
+                **({"reasoning": {"effort": effort}} if effort else {}),
                 **self._codex_session_kwargs(),
             ) as stream:
                 for event in stream:
@@ -294,6 +598,7 @@ class LLMClient:
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "input": input_items,
+                **({"reasoning": {"effort": self.reasoning_effort}} if self.reasoning_effort else {}),
                 **self._codex_session_kwargs(),
             }
             if instructions:
@@ -331,6 +636,6 @@ class LLMClient:
                     )
 
             content = "".join(text_parts) or getattr(final, "output_text", "") or None
-            return _chat_completion_like(content, tool_calls)
+            return _chat_completion_like(content, tool_calls, usage=getattr(final, "usage", None))
 
         return self._codex_retry(run_once)
